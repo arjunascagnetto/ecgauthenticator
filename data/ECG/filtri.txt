@@ -1,0 +1,50 @@
+DOCUMENTAZIONE FILTRI APPLICATI - DATASET ECG
+==========================================
+
+DATASET ORIGINALE: dataset_ecg.csv
+-----------------------------------
+
+Distribuzione esami per paziente:
+
+Numero Esami | Numero Pazienti | Percentuale
+-------|-----|-------
+1      | 1.073 | 1.98%
+2      | 26.320 | 48.60%
+3      | 12.200 | 22.53%
+4      | 6.460 | 11.93%
+5      | 3.601 | 6.65%
+6      | 2.027 | 3.74%
+7      | 1.234 | 2.28%
+8      | 709 | 1.31%
+9      | 397 | 0.73%
+10     | 131 | 0.24%
+TOTALE | 54.152 | 100.00%
+
+FILTRO 1: Esclusione pazienti con un solo esame
+-----------------------------------------------
+Descrizione: Rimuove tutti i pazienti che hanno solo 1 esame nel dataset
+
+Criterio: PatientID con numero di esami > 1
+
+Risultati dopo filtro:
+- Numero esami: 164.440
+- Numero pazienti: 53.079
+
+File generato: 01filter.csv
+Data generazione: 2025-10-28
+
+FILTRO 2: Selezione colonne
+-----------------------------------------------
+Descrizione: Mantiene solo le colonne rilevanti per l'analisi
+
+Colonne selezionate:
+- Identificatori: PatientID, ExamID
+- Info paziente: AcquisitionDate, Gender, PatientAge
+- Features ECG (13): VentricularRate, PRInterval, QRSDuration, QTInterval, QTCorrected, PAxis, RAxis, TAxis, QOnset, QOffset, POnset, POffset, TOffset
+
+Risultati dopo filtro:
+- Numero esami: 164.440
+- Numero pazienti: 53.079
+
+File generato: 02filter.csv
+Data generazione: 2025-10-28
