@@ -213,7 +213,8 @@ def train_epoch(encoder, loss_fn, optimizer, features, patient_ids, batch_indice
         pbar.set_postfix({
             'loss': f'{loss.item():.4f}',
             'intra': f'{intra_dist:.4f}',
-            'inter': f'{inter_dist:.4f}'
+            'inter': f'{inter_dist:.4f}',
+            'active_neg%': f'{active_neg_pct:.1f}%'
         })
 
     avg_loss = total_loss / num_batches if num_batches > 0 else 0.0
@@ -442,6 +443,7 @@ def main():
         print(f"  Val DB:         {db_score:.2f}")
         print("="*90 + "\n")
 
+        logger.info(f"Loss: {train_loss:.6f}, Active neg: {train_active_neg_pct:.1f}%")
         logger.info(f"Distances - Intra: {train_intra_dist:.4f}, Inter: {train_inter_dist:.4f}, Ratio: {dist_ratio:.2f}x")
         logger.info(f"Val CH: {ch_score:.2f}, DB: {db_score:.2f}")
 
