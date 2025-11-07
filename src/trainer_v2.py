@@ -63,27 +63,33 @@ class ContrastiveLoss(nn.Module):
             positive: (N, D) embeddings
             labels: (N,) binary labels (0=same patient, 1=different patient)
         Returns:
-            loss, active_negatives_pct
+            loss, active_negatives_pct, intra_dist, inter_dist
         """
         # Distanza cosine
         cosine_sim = F.cosine_similarity(anchor, positive, dim=1)
         cosine_dist = 1 - cosine_sim
 
         # Loss
-        pos_loss = cosine_dist[labels == 0].mean() if (labels == 0).sum() > 0 else 0
-        neg_loss = torch.relu(self.margin - cosine_dist[labels == 1])
-        neg_loss = neg_loss.mean() if (labels == 1).sum() > 0 else 0
+        intra_dists = cosine_dist[labels == 0]
+        inter_dists = cosine_dist[labels == 1]
+
+        pos_loss = intra_dists.mean() if len(intra_dists) > 0 else 0
+        neg_loss = torch.relu(self.margin - inter_dists)
+        neg_loss = neg_loss.mean() if len(inter_dists) > 0 else 0
 
         loss = pos_loss + neg_loss
 
-        # % negativi attivi (che violano margin)
-        if (labels == 1).sum() > 0:
-            active_negs = (cosine_dist[labels == 1] < self.margin).sum().float()
-            active_negatives_pct = (active_negs / (labels == 1).sum()).item() * 100
+        # Metriche
+        intra_mean = intra_dists.mean().item() if len(intra_dists) > 0 else 0.0
+        inter_mean = inter_dists.mean().item() if len(inter_dists) > 0 else 0.0
+
+        if len(inter_dists) > 0:
+            active_negs = (inter_dists < self.margin).sum().float()
+            active_negatives_pct = (active_negs / len(inter_dists)).item() * 100
         else:
             active_negatives_pct = 0.0
 
-        return loss, active_negatives_pct
+        return loss, active_negatives_pct, intra_mean, inter_mean
 
 
 def get_mining_strategy(epoch, config_mining):
@@ -177,6 +183,8 @@ def train_epoch(encoder, loss_fn, optimizer, features, patient_ids, batch_indice
     encoder.train()
     total_loss = 0.0
     total_active_neg_pct = 0.0
+    total_intra_dist = 0.0
+    total_inter_dist = 0.0
     num_batches = 0
 
     pbar = tqdm(batch_indices_list, desc=f"Train [{mining_strategy}]",
@@ -191,24 +199,29 @@ def train_epoch(encoder, loss_fn, optimizer, features, patient_ids, batch_indice
         anchor_embs = encoder(anchors)
         other_embs = encoder(others)
 
-        loss, active_neg_pct = loss_fn(anchor_embs, other_embs, labels)
+        loss, active_neg_pct, intra_dist, inter_dist = loss_fn(anchor_embs, other_embs, labels)
 
         loss.backward()
         optimizer.step()
 
         total_loss += loss.item()
         total_active_neg_pct += active_neg_pct
+        total_intra_dist += intra_dist
+        total_inter_dist += inter_dist
         num_batches += 1
 
         pbar.set_postfix({
             'loss': f'{loss.item():.4f}',
-            'active_neg%': f'{active_neg_pct:.1f}%'
+            'intra': f'{intra_dist:.4f}',
+            'inter': f'{inter_dist:.4f}'
         })
 
     avg_loss = total_loss / num_batches if num_batches > 0 else 0.0
     avg_active_neg_pct = total_active_neg_pct / num_batches if num_batches > 0 else 0.0
+    avg_intra_dist = total_intra_dist / num_batches if num_batches > 0 else 0.0
+    avg_inter_dist = total_inter_dist / num_batches if num_batches > 0 else 0.0
 
-    return avg_loss, avg_active_neg_pct
+    return avg_loss, avg_active_neg_pct, avg_intra_dist, avg_inter_dist
 
 
 @torch.no_grad()
@@ -272,7 +285,7 @@ def main():
 
     # Timestamp e directory
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    base_dir = Path('/Users/arjuna/Progetti/siamese')
+    base_dir = Path(__file__).parent.parent  # Usa directory del progetto
     run_dir = base_dir / 'runs_v2' / f'run_{timestamp}'
     run_dir.mkdir(parents=True, exist_ok=True)
 
@@ -303,8 +316,12 @@ def main():
 
     # Dataset
     logger.info("Loading datasets...")
-    train_dataset = ECGPairDataset(config['data']['train_csv'], mining_strategy="random")
-    val_dataset = ECGPairDataset(config['data']['val_csv'], mining_strategy="random")
+    # Converti path relativi a assoluti basati su base_dir
+    train_csv = base_dir / config['data']['train_csv']
+    val_csv = base_dir / config['data']['val_csv']
+
+    train_dataset = ECGPairDataset(str(train_csv), mining_strategy="random")
+    val_dataset = ECGPairDataset(str(val_csv), mining_strategy="random")
 
     train_features = train_dataset.features
     train_patient_ids = train_dataset.patient_ids
@@ -332,8 +349,7 @@ def main():
         optimizer,
         mode='max',
         factor=config['optimizer'].get('lr_scheduler_factor', 0.5),
-        patience=config['optimizer'].get('lr_scheduler_patience', 5),
-        verbose=True
+        patience=config['optimizer'].get('lr_scheduler_patience', 5)
     )
 
     logger.info(f"Encoder: {encoder}")
@@ -349,6 +365,8 @@ def main():
         'mining_strategy': [],
         'train_loss': [],
         'train_active_neg_pct': [],
+        'train_intra_dist': [],
+        'train_inter_dist': [],
         'val_ch': [],
         'val_db': []
     }
@@ -384,12 +402,12 @@ def main():
         batch_indices_list = list(pk_sampler)
 
         # Train
-        train_loss, train_active_neg_pct = train_epoch(
+        train_loss, train_active_neg_pct, train_intra_dist, train_inter_dist = train_epoch(
             encoder, loss_fn, optimizer, train_features, train_patient_ids,
             batch_indices_list, device, mining_strategy
         )
 
-        logger.info(f"Epoch {epoch} - Train loss: {train_loss:.6f}, Active neg: {train_active_neg_pct:.1f}%")
+        logger.info(f"Epoch {epoch} - Loss: {train_loss:.6f}, Intra: {train_intra_dist:.4f}, Inter: {train_inter_dist:.4f}")
 
         # Validate
         val_metrics, val_embeddings = validate(encoder, val_dataset, device)
@@ -402,6 +420,8 @@ def main():
         history['mining_strategy'].append(mining_strategy)
         history['train_loss'].append(train_loss)
         history['train_active_neg_pct'].append(train_active_neg_pct)
+        history['train_intra_dist'].append(train_intra_dist)
+        history['train_inter_dist'].append(train_inter_dist)
         history['val_ch'].append(ch_score)
         history['val_db'].append(db_score)
 
@@ -410,7 +430,9 @@ def main():
         print(f"EPOCH {epoch:3d} | Strategy: {mining_strategy:10s} | Patience: {patience_counter:2d}/{patience}")
         print("="*90)
         print(f"  Train Loss:     {train_loss:.6f}")
-        print(f"  Active Neg:     {train_active_neg_pct:.1f}%")
+        print(f"  Intra dist:     {train_intra_dist:.4f}")
+        print(f"  Inter dist:     {train_inter_dist:.4f}")
+        print(f"  Margin:         {train_inter_dist - train_intra_dist:.4f}")
         print(f"  Val CH:         {ch_score:.2f}")
         print(f"  Val DB:         {db_score:.2f}")
         print("="*90 + "\n")

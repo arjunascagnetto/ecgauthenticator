@@ -2,8 +2,8 @@
 # Curriculum mining: random → semi-hard → hard
 
 training:
-  max_epochs: 100
-  patience: 15
+  max_epochs: 50
+  patience: 10  # Early stopping patience
 
 optimizer:
   learning_rate: 5.0e-4
@@ -12,13 +12,13 @@ optimizer:
   lr_scheduler_patience: 5
 
 loss:
-  margin: 1.0  # Contrastive loss margin
+  margin: 2.0  # Contrastive loss margin
 
 # Curriculum mining: 3 fasi
 mining:
   random_epochs: 10       # Epoch 1-10: random mining
   semihard_epochs: 25     # Epoch 11-25: semi-hard mining
-  hardmining_epochs: 100  # Epoch 26-100: hard mining
+  hardmining_epochs: 50  # Epoch 26-100: hard mining
 
 # PK sampling per batch
 batch:
@@ -28,13 +28,14 @@ batch:
 
 encoder:
   input_dim: 13
-  hidden_dims: [20]
+  hidden_dims: [64, 128, 64]
   embedding_dim: 32
   dropout: 0.2
   normalize: true
 
 data:
-  train_csv: /Users/arjuna/Progetti/siamese/data/ECG/train.csv
-  val_csv: /Users/arjuna/Progetti/siamese/data/ECG/val.csv
+  # Path relativi rispetto alla directory del progetto
+  train_csv: data/ECG/train.csv
+  val_csv: data/ECG/val.csv
 
-device: cpu
+device: cuda
