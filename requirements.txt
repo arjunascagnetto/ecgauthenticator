@@ -16,3 +16,7 @@ PyYAML>=6.0
 
 # Progress bars and utilities
 tqdm>=4.66.0
+
+# Visualization
+matplotlib>=3.7.0
+PyQt5>=5.15.0

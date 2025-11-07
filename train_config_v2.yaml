@@ -28,8 +28,8 @@ batch:
 
 encoder:
   input_dim: 13
-  hidden_dims: [32, 64]
-  embedding_dim: 32
+  hidden_dims: [32, 64, 128]
+  embedding_dim: 64
   dropout: 0.2
   normalize: true
 
