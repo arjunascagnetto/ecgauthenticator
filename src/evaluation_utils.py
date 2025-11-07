@@ -17,49 +17,10 @@ def compute_batch_metrics(embeddings: np.ndarray, patient_ids: np.ndarray) -> Di
 
     Returns:
         dict con:
-        - d_intra: media distanze cosine intra-paziente (same patient)
-        - d_inter: media distanze cosine inter-paziente (different patient)
-        - db: Davies-Bouldin index
-        - ch: Calinski-Harabasz index
+        - db: Davies-Bouldin index (lower is better)
+        - ch: Calinski-Harabasz index (higher is better)
     """
     metrics = {}
-
-    # Calcola distanze intra e inter paziente
-    unique_patients = np.unique(patient_ids)
-    intra_distances = []
-    inter_distances = []
-
-    # Intra-patient distances
-    for patient_id in unique_patients:
-        mask = patient_ids == patient_id
-        patient_embs = embeddings[mask]
-
-        if len(patient_embs) > 1:
-            # Calcola pairwise distances (cosine)
-            dists = 1 - np.dot(patient_embs, patient_embs.T)
-            # Upper triangular (escludi diagonale)
-            upper_indices = np.triu_indices(len(patient_embs), k=1)
-            intra_distances.extend(dists[upper_indices])
-
-    # Inter-patient distances
-    for i, p1 in enumerate(unique_patients):
-        for p2 in unique_patients[i + 1:]:
-            mask1 = patient_ids == p1
-            mask2 = patient_ids == p2
-
-            embs1 = embeddings[mask1]
-            embs2 = embeddings[mask2]
-
-            # Calcola pairwise distances
-            dists = 1 - np.dot(embs1, embs2.T)
-            inter_distances.extend(dists.flatten())
-
-    # Medie
-    d_intra = np.mean(intra_distances) if intra_distances else 0.0
-    d_inter = np.mean(inter_distances) if inter_distances else 0.0
-
-    metrics['d_intra'] = float(d_intra)
-    metrics['d_inter'] = float(d_inter)
 
     # Clustering metrics
     try:

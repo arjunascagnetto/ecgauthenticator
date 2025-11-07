@@ -12,13 +12,15 @@ from autoencoder import Autoencoder, AutoencoderLoss
 CONFIG = {
     'device': 'cuda' if torch.cuda.is_available() else 'cpu',
     'input_dim': 13,
-    'latent_dim': 16,
-    'dropout_rate': 0.4,
-    'batch_size': 256,
-    'num_epochs': 100,
-    'learning_rate': 5e-4,
-    'lambda_l2': 1e-4,
-    'early_stopping_patience': 5,
+    'latent_dim': 32,
+    'hidden_dim': 20,
+    'encoder_dropout': 0.2,
+    'decoder_dropout': 0.1,
+    'batch_size': 64,
+    'num_epochs': 300,
+    'learning_rate': 1e-3,
+    'weight_decay': 1e-5,
+    'early_stopping_patience': 20,
 }
 
 def train_epoch(model, criterion, optimizer, train_loader, device):
@@ -105,14 +107,30 @@ def main():
     model = Autoencoder(
         input_dim=CONFIG['input_dim'],
         latent_dim=CONFIG['latent_dim'],
-        dropout_rate=CONFIG['dropout_rate']
+        hidden_dim=CONFIG['hidden_dim'],
+        encoder_dropout=CONFIG['encoder_dropout'],
+        decoder_dropout=CONFIG['decoder_dropout']
     ).to(device)
 
     print(f"  Model:\n{model}")
 
     # Loss e optimizer
-    criterion = AutoencoderLoss(model, lambda_l2=CONFIG['lambda_l2'])
-    optimizer = optim.Adam(model.parameters(), lr=CONFIG['learning_rate'])
+    criterion = AutoencoderLoss(model, lambda_l2=0)  # No L2 penalty, use weight_decay instead
+    optimizer = optim.AdamW(
+        model.parameters(),
+        lr=CONFIG['learning_rate'],
+        weight_decay=CONFIG['weight_decay']
+    )
+
+    # Learning rate scheduler
+    scheduler = optim.lr_scheduler.ReduceLROnPlateau(
+        optimizer,
+        mode='min',
+        factor=0.5,
+        patience=10,
+        min_lr=1e-6,
+        verbose=True
+    )
 
     # Training loop con early stopping
     print("\nTraining...")
@@ -139,8 +157,11 @@ def main():
         history.append(log)
 
         print(f"Epoch {epoch + 1}/{CONFIG['num_epochs']} | "
-              f"Train Loss: {train_metrics['loss']:.6f} (MSE: {train_metrics['mse']:.6f}, L2: {train_metrics['l2']:.6f}) | "
+              f"Train Loss: {train_metrics['loss']:.6f} (MSE: {train_metrics['mse']:.6f}) | "
               f"Val Loss: {val_metrics['loss']:.6f}")
+
+        # Learning rate scheduler
+        scheduler.step(val_metrics['loss'])
 
         # Early stopping
         if val_metrics['loss'] < best_val_loss:

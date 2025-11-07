@@ -21,12 +21,33 @@ import numpy as np
 import pandas as pd
 from tqdm import tqdm
 import logging
+import signal
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 from src.ecg_encoder import ECGEncoder
 from src.ecg_metric_dataset import ECGPairDataset, PKSampler
 from src.evaluation_utils import compute_batch_metrics
+
+
+# Graceful shutdown state
+shutdown_requested = False
+force_shutdown_count = 0
+
+
+def signal_handler(signum, frame):
+    """Gestisce CTRL+C: graceful alla 1a pressione, force alla 2a"""
+    global shutdown_requested, force_shutdown_count
+
+    force_shutdown_count += 1
+
+    if force_shutdown_count == 1:
+        shutdown_requested = True
+        print("\n\n⚠️  Graceful shutdown requested. Finishing current epoch and saving state...")
+        print("   Press CTRL+C again to force immediate shutdown.\n")
+    else:
+        print("\n\n🛑 Force shutdown! Exiting immediately...\n")
+        sys.exit(1)
 
 
 class ContrastiveLoss(nn.Module):
@@ -244,6 +265,11 @@ def setup_logging(run_dir):
 
 
 def main():
+    global shutdown_requested, force_shutdown_count
+
+    # Setup signal handler per CTRL+C
+    signal.signal(signal.SIGINT, signal_handler)
+
     # Timestamp e directory
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     base_dir = Path('/Users/arjuna/Progetti/siamese')
@@ -339,6 +365,11 @@ def main():
     print("="*90 + "\n")
 
     for epoch in range(1, num_epochs + 1):
+        # Check graceful shutdown request
+        if shutdown_requested:
+            logger.info(f"Graceful shutdown at epoch {epoch}")
+            break
+
         # Mining strategy
         mining_strategy = get_mining_strategy(epoch, config['mining'])
         logger.info(f"Epoch {epoch} - Mining: {mining_strategy}")
@@ -420,7 +451,8 @@ def main():
     results = {
         'best_epoch': int(best_epoch),
         'best_ch': float(best_ch),
-        'final_db': float(history['val_db'][-1]) if history['val_db'] else 0.0
+        'final_db': float(history['val_db'][-1]) if history['val_db'] else 0.0,
+        'shutdown_type': 'graceful' if shutdown_requested else 'normal'
     }
 
     results_path = run_dir / 'results.json'
@@ -429,8 +461,10 @@ def main():
 
     logger.info(f"Results saved to {results_path}")
 
+    # Stampa finale
+    status_msg = "SHUTDOWN (graceful)" if shutdown_requested else "COMPLETED"
     print("\n" + "="*90)
-    print("✓ TRAINING COMPLETED")
+    print(f"✓ TRAINING {status_msg}")
     print(f"✓ Run dir: {run_dir}")
     print(f"✓ Best epoch: {best_epoch} (CH={best_ch:.2f})")
     print("="*90 + "\n")

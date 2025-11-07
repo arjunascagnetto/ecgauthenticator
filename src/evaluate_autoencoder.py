@@ -84,7 +84,13 @@ def main():
 
     # Carica modello
     print("\nLoading model...")
-    model = Autoencoder(input_dim=13, latent_dim=16, dropout_rate=0.4).to(device)
+    model = Autoencoder(
+        input_dim=13,
+        latent_dim=32,
+        hidden_dim=20,
+        encoder_dropout=0.2,
+        decoder_dropout=0.1
+    ).to(device)
     model_path = '/Users/arjuna/Progetti/siamese/models/autoencoder_best.pth'
     model.load_state_dict(torch.load(model_path, map_location=device))
     print(f"  Model loaded from: {model_path}")
@@ -99,9 +105,9 @@ def main():
     print("\nCalculating metrics...")
     metrics = calculate_metrics(inputs, outputs, embeddings, feature_names)
 
-    # Salva embeddings 16D
+    # Salva embeddings 32D
     print("\nSaving embeddings...")
-    embeddings_path = '/Users/arjuna/Progetti/siamese/results/embeddings_16d.npy'
+    embeddings_path = '/Users/arjuna/Progetti/siamese/results/embeddings_32d.npy'
     os.makedirs(os.path.dirname(embeddings_path), exist_ok=True)
     np.save(embeddings_path, embeddings)
     print(f"  ✅ Embeddings saved: {embeddings_path}")
@@ -156,11 +162,11 @@ def main():
     print("✅ EVALUATION COMPLETED")
     print("=" * 80)
     print(f"\nOutput files:")
-    print(f"  - Embeddings 16D: {embeddings_path}")
+    print(f"  - Embeddings 32D: {embeddings_path}")
     print(f"  - Reconstruction: {reconstruction_path}")
     print(f"  - Evaluation details: {results_path}")
     print(f"  - Metrics: {metrics_path}")
-    print(f"\nEmbedding shape: {embeddings.shape} (16D per sample)")
+    print(f"\nEmbedding shape: {embeddings.shape} (32D per sample)")
 
 if __name__ == '__main__':
     main()

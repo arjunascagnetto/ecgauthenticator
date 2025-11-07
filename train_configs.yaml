@@ -1,0 +1,151 @@
+# ==============================================================================
+# ECG METRIC LEARNING TRAINING CONFIGURATION
+# ==============================================================================
+
+training:
+  use_curriculum: false
+  max_epochs: 50
+  patience: 10
+  # Threshold per collapse detection (early stopping quando CH < questo valore)
+  early_stop_ch_threshold: 0.1
+
+optimizer:
+  learning_rate: 0.001
+  weight_decay: 0.0
+  lr_scheduler_factor: 0.5
+  lr_scheduler_patience: 5
+
+loss:
+  # Opzioni: contrastive | adaptive_contrastive | curriculum_contrastive | multi_similarity
+  loss_type: curriculum_contrastive
+  # margin_init e margin_final: utilizzati da contrastive, adaptive_contrastive, curriculum_contrastive
+  margin_init: 1.0
+  margin_final: 0.5
+  # alpha, beta, lambda_param: utilizzati da multi_similarity
+  alpha: 2.0
+  beta: 50.0
+  lambda_param: 0.5
+
+mining:
+  # PROGRESSIVE MINING: transizione automatica tra strategie in base alle epoche
+  # Fase 1 (random):     epoch 1 to random_epochs
+  # Fase 2 (semi-hard):  epoch (random_epochs+1) to semihard_epochs
+  # Fase 3 (hard):       epoch (semihard_epochs+1) to hardmining_epochs
+  use_progressive: true
+
+  # Numero totale di epoche per ogni fase
+  random_epochs: 5              # Epoch 1-5:   random mining + high margin
+  semihard_epochs: 10           # Epoch 6-10:  semi-hard mining + medium margin
+  hardmining_epochs: 20         # Epoch 11-20: hard mining + low margin
+
+  # OLD (ignorato se use_progressive=true):
+  # strategy: semi-hard
+  # start_epoch: 5
+
+batch:
+  # Se true: batch_size = num_patients_per_batch * num_ecg_per_patient (P*K sampling)
+  # Se false: usa il valore batch_size specificato sotto
+  use_pk_sampling: true
+  batch_size: 256  # Usato solo se use_pk_sampling=false
+  num_patients_per_batch: 64  # P (numero pazienti per batch)
+  num_ecg_per_patient: 4      # K (ECG per paziente)
+  shuffle: true
+
+encoder:
+  input_dim: 13
+  # hidden_dims: lista di dimensioni per hidden layers
+  # Esempio: [20] → 13→20→32
+  # Esempio: [64, 32] → 13→64→32→32
+  # Esempio: [128, 64, 32] → 13→128→64→32→32
+  hidden_dims: [32,64,32]
+  embedding_dim: 32
+  dropout: 0.2
+  # Se true: L2-normalizza gli embeddings
+  normalize: true
+
+validation:
+  sample_size: 99
+  compute_silhouette: false
+  compute_bw_ratio: false
+
+# ============================================================================
+# PERFORMANCE OPTIMIZATION FLAGS
+# ============================================================================
+# Questi flag controllano quali metriche calcolare durante training.
+# Le metriche disabilitate qui possono essere calcolate POST-training
+# caricando i checkpoints salvati ad ogni epoca.
+# ============================================================================
+performance:
+  # Calcola metriche per ogni batch durante training
+  # Default: true (per debug/monitoraggio dettagliato)
+  # Se false: risparmia ~10-15 sec/epoca
+  # Dato: salvato in batch_metrics_train.csv
+  # Post-training: ricalcolabile da checkpoints
+  compute_train_batch_metrics: false
+
+  # Calcola metriche per ogni batch durante validation
+  # Default: true (per debug/monitoraggio dettagliato)
+  # Se false: risparmia ~20-30 sec/epoca
+  # Dato: salvato in batch_metrics_val.csv
+  # Post-training: ricalcolabile da checkpoints
+  compute_val_batch_metrics: false
+
+  # Calcola distanze intra/inter-paziente GLOBALI su intero validation set
+  # Default: true (utile per monitorare convergenza)
+  # Se false: risparmia ~5-10 sec/epoca
+  # Dato: val_d_intra_global, val_d_inter_global in train_history.csv
+  # Post-training: ricalcolabile da checkpoints
+  compute_val_global_distances: false
+
+  # Calcola Davies-Bouldin Index (costoso, alternativa rapida: Calinski-Harabasz)
+  # Default: true (metrica clustering affidabile)
+  # Se false: risparmia ~5-10 sec/epoca
+  # Dato: val_db_mean/std in train_history.csv
+  # Post-training: ricalcolabile da checkpoints
+  compute_val_db_score: true
+
+  # Valida ogni N epoche invece che ogni epoca
+  # Default: 1 (valida ogni epoca)
+  # Suggerito: 2 o 3 per training veloce
+  # Se 2: risparmia ~50% tempo validation
+  # Attenzione: potrebbe ridurre qualità early stopping
+  validation_frequency: 1
+
+test:
+  # ========================================================================
+  # Configurazione metriche per TEST SET (calcolate al termine del training)
+  # ========================================================================
+
+  # Calcola Between-Within Ratio sul test set (costoso computazionalmente)
+  # Se false: risparmia ~5-10 sec
+  # Dato: salvato in results/metrics.json -> test_metrics
+  compute_bw_ratio: false
+
+  # Calcola Silhouette Coefficient sul test set (MOLTO costoso - lentissimo)
+  # Se false: risparmia ~30-60 sec (dipende dalla dimensione test set)
+  # Dato: salvato in results/metrics.json -> test_metrics
+  compute_silhouette: false
+
+  # Calcola Davies-Bouldin Index sul test set
+  # Se false: risparmia ~5-10 sec
+  # Dato: salvato in results/metrics.json -> test_metrics
+  compute_db: false
+
+  # Calcola distanze intra/inter-paziente GLOBALI su intero test set
+  # Se false: risparmia ~5-10 sec
+  # Dato: salvato in results/metrics.json -> test_metrics (d_intra_global, d_inter_global)
+  compute_global_distances: false
+
+data:
+  train_csv: "/Users/arjuna/Progetti/siamese/data/ECG/train.csv"
+  val_csv: "/Users/arjuna/Progetti/siamese/data/ECG/val.csv"
+  test_csv: "/Users/arjuna/Progetti/siamese/data/ECG/test.csv"
+
+output:
+  base_dir: "/Users/arjuna/Progetti/siamese"
+  runs_dir: "runs"
+  # Ogni run crea una sottocartella: runs/run_YYYYMMDD_HHMMSS/
+
+# Opzioni: cpu | cuda | mps
+# mps = Metal Performance Shaders (per Mac M1/M2/M3)
+device: cpu

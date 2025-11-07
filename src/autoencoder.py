@@ -2,36 +2,60 @@ import torch
 import torch.nn as nn
 
 class Autoencoder(nn.Module):
-    """Vanilla Autoencoder: 13D → 16D → 13D"""
+    """Vanilla Autoencoder: 13D → 32D → 13D con hidden layer 20D"""
 
-    def __init__(self, input_dim=13, latent_dim=16, dropout_rate=0.4):
+    def __init__(self, input_dim=13, latent_dim=32, hidden_dim=20,
+                 encoder_dropout=0.2, decoder_dropout=0.1):
         """
         Args:
             input_dim: numero di features ECG (13)
-            latent_dim: dimensione spazio latente (16)
-            dropout_rate: probabilità dropout
+            latent_dim: dimensione spazio latente (32)
+            hidden_dim: dimensione hidden layer (20)
+            encoder_dropout: probabilità dropout encoder
+            decoder_dropout: probabilità dropout decoder
         """
         super(Autoencoder, self).__init__()
 
         self.input_dim = input_dim
         self.latent_dim = latent_dim
+        self.hidden_dim = hidden_dim
 
-        # Encoder: 13 → 16 (diretto)
+        # Encoder: 13 → 20 → 32
         self.encoder = nn.Sequential(
-            nn.Linear(input_dim, latent_dim),
+            nn.Linear(input_dim, hidden_dim),
+            nn.BatchNorm1d(hidden_dim),
+            nn.ELU(),
+            nn.Dropout(encoder_dropout),
+
+            nn.Linear(hidden_dim, latent_dim),
             nn.BatchNorm1d(latent_dim),
-            nn.ReLU(),
-            nn.Dropout(dropout_rate)
+            nn.ELU()
         )
 
-        # Decoder: 16 → 13 (diretto)
+        # Decoder: 32 → 20 → 13
         self.decoder = nn.Sequential(
-            nn.Linear(latent_dim, input_dim)
+            nn.Linear(latent_dim, hidden_dim),
+            nn.BatchNorm1d(hidden_dim),
+            nn.ELU(),
+            nn.Dropout(decoder_dropout),
+
+            nn.Linear(hidden_dim, input_dim)
             # Output layer senza attivazione (ricostruzione lineare)
         )
 
+        # Inizializzazione He per ELU
+        self._init_weights()
+
+    def _init_weights(self):
+        """Inizializza pesi con He initialization"""
+        for m in self.modules():
+            if isinstance(m, nn.Linear):
+                nn.init.kaiming_normal_(m.weight, mode='fan_in', nonlinearity='relu')
+                if m.bias is not None:
+                    nn.init.constant_(m.bias, 0)
+
     def encode(self, x):
-        """Estrae l'embedding 16D"""
+        """Estrae l'embedding 32D"""
         return self.encoder(x)
 
     def decode(self, z):

@@ -1,0 +1,130 @@
+\documentclass[11pt]{article}
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage{geometry}
+\geometry{margin=1in}
+\usepackage{amsmath,amssymb}
+\usepackage{booktabs}
+\usepackage{mathtools}
+\usepackage{natbib}
+\usepackage{hyperref}
+
+\newcommand{\R}{\mathbb{R}}
+\newcommand{\norm}[1]{\left\lVert #1 \right\rVert}
+\newcommand{\E}{\mathbb{E}}
+
+\title{Assessing Clustering Quality in Patient-Specific ECG Embeddings}
+\author{}
+\date{\today}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+High-quality patient-specific embeddings must simultaneously maintain compact intra-patient cohesion and well-separated inter-patient structure. This review summarizes the most informative validation criteria for clustering structure in learned embedding spaces, emphasizing indices grounded in intra-cluster scatter and inter-cluster separation. We provide the mathematical formulation of each metric, discuss their statistical underpinnings, and outline practical guidance tailored to electrocardiogram (ECG) representation learning.
+\end{abstract}
+
+\section{Introduction}
+Let $\mathcal{X} = \{x_i\}_{i=1}^N \subset \R^d$ denote embedding vectors extracted from ECG exams and let $\mathcal{C} = \{C_k\}_{k=1}^K$ denote the partition induced either by patient identifiers or a clustering algorithm. Robust evaluation of clustering quality is central for downstream biometric verification, anomaly detection, and longitudinal monitoring in cardiology. Indices that combine intra-cluster cohesion with inter-cluster separation are especially relevant because they align with the clinical expectation that repeated exams from the same patient should form tight clusters while different patients remain distinguishable.
+
+This note formalizes leading validity indices, categorizes them by their reliance on scatter or density statistics, and highlights implementation details that preserve numerical stability in high-dimensional ECG embeddings.
+
+\section{Notation and Basic Quantities}
+For each cluster $C_k$, define its cardinality $n_k = |C_k|$ and centroid
+\begin{equation}
+  \mu_k = \frac{1}{n_k} \sum_{x_i \in C_k} x_i.
+\end{equation}
+The global centroid is given by $\bar{x} = \frac{1}{N} \sum_{i=1}^{N} x_i$.
+We use two generic building blocks:
+\begin{align}
+  S_k^{(p)} &= \left( \frac{1}{n_k} \sum_{x_i \in C_k} \norm{x_i - \mu_k}^p \right)^{1/p} \quad \text{(within-cluster dispersion)}, \label{eq:scatter} \\
+  M_{kl} &= \norm{\mu_k - \mu_l} \quad \text{(centroid separation)}. \label{eq:separation}
+\end{align}
+When $p=2$, $S_k^{(2)}$ coincides with the root mean square deviation. Alternative scatter measures include the maximum intra-cluster distance (diameter)
+\begin{equation}
+  \Delta(C_k) = \max_{x_i, x_j \in C_k} \norm{x_i - x_j},
+\end{equation}
+while an inter-cluster distance can be defined via single, complete, or average linkage; we denote a generic choice by $\delta(C_k, C_l)$.
+
+\section{Scatter-Separation Indices}
+\subsection{Between-Within Ratio}
+A simple but informative baseline is the between-within ratio
+\begin{equation}
+  \operatorname{BWR} = \frac{\frac{2}{K(K-1)} \sum_{k < l} M_{kl}}{\frac{1}{K} \sum_{k=1}^{K} S_k^{(2)}},
+\end{equation}
+where larger values imply better separation relative to cohesion. Although scale-dependent, BWR is a useful diagnostic when monitored across training epochs.
+
+\subsection{Calinski--Harabasz Index}
+The Calinski--Harabasz (CH) index \citep{calinski1974dendrite} compares between-cluster scatter $B$ and within-cluster scatter $W$:
+\begin{align}
+  W &= \sum_{k=1}^{K} \sum_{x_i \in C_k} (x_i - \mu_k)(x_i - \mu_k)^{\top}, \\
+  B &= \sum_{k=1}^{K} n_k (\mu_k - \bar{x})(\mu_k - \bar{x})^{\top}, \\
+  \operatorname{CH} &= \frac{\operatorname{tr}(B)/(K-1)}{\operatorname{tr}(W)/(N-K)}.
+\end{align}
+Higher CH values indicate more distinct and compact clusters. The ratio is invariant under affine scaling, making it suitable for comparing embeddings with different variance levels.
+
+\section{Pairwise Distance Indices}
+\subsection{Silhouette Coefficient}
+The silhouette coefficient \citep{rousseeuw1987silhouettes} evaluates each embedding individually. Define the intra-cluster distance for a point $x_i \in C_{k(i)}$ as
+\begin{equation}
+  a_i = \frac{1}{n_{k(i)} - 1} \sum_{\substack{x_j \in C_{k(i)} \\ j \neq i}} \norm{x_i - x_j},
+\end{equation}
+and the lowest mean distance to points in another cluster as
+\begin{equation}
+  b_i = \min_{l \neq k(i)} \frac{1}{n_l} \sum_{x_j \in C_l} \norm{x_i - x_j}.
+\end{equation}
+The silhouette score is then
+\begin{equation}
+  s_i = \frac{b_i - a_i}{\max\{a_i, b_i\}}, \qquad S = \frac{1}{N} \sum_{i=1}^{N} s_i.
+\end{equation}
+Values near $1$ imply strong clustering, values around $0$ indicate overlap, and negative values signal possible misassignment.
+
+\subsection{Dunn Index}
+The Dunn index \citep{dunn1973separability} focuses on extremal distances:
+\begin{equation}
+  D = \frac{\min_{i \neq j} \delta(C_i, C_j)}{\max_{k} \Delta(C_k)}.
+\end{equation}
+A large Dunn index combines large inter-cluster separation with small intra-cluster diameter. Robust computation benefits from using average-linkage for $\delta$ to mitigate noise sensitivity in ECG embeddings.
+
+\section{Cluster-Centric Aggregation Indices}
+\subsection{Davies--Bouldin Index}
+The Davies--Bouldin (DB) index \citep{davies1979cluster} penalizes clusters whose scatter is large relative to their separation:
+\begin{equation}
+  R_{kl} = \frac{S_k^{(2)} + S_l^{(2)}}{M_{kl}}, \qquad \operatorname{DB} = \frac{1}{K} \sum_{k=1}^{K} \max_{l \neq k} R_{kl}.
+\end{equation}
+Lower DB values indicate better clustering. Because DB relies on centroids, it is computationally efficient for high-cardinality ECG cohorts.
+
+\subsection{Xie--Beni Index}
+The Xie--Beni (XB) index \citep{xie1991validity} was introduced for fuzzy clustering but applies to hard partitions as well:
+\begin{equation}
+  \operatorname{XB} = \frac{\sum_{k=1}^{K} \sum_{x_i \in C_k} \norm{x_i - \mu_k}^2}{N \cdot \min_{i \neq j} M_{ij}^2}.
+\end{equation}
+Smaller XB values reflect compact clusters widely separated by their centroids. XB is sensitive to outliers; trimming the top percentile of intra-cluster distances improves robustness in ECG applications.
+
+\subsection{SD and SD$_{\text{BW}}$ Indices}
+Halkidi et al. propose the SD and SD$_{\text{BW}}$ indices \citep{halkidi2001clustering} that combine scatter with density uniformity. SD balances average scattering $\bar{S} = \frac{1}{K} \sum_k S_k^{(2)}$ against the standard deviation of inter-centroid distances, while SD$_{\text{BW}}$ augments DB with a density term computed over neighborhood radii. These indices detect over-partitioning, a common failure mode when embeddings collapse locally.
+
+\section{Temporal and Patient-Level Diagnostics for ECG}
+ECG embeddings often include repeated exams per patient. We recommend complementing static indices with longitudinal diagnostics:
+\begin{enumerate}
+  \item \textbf{Trajectory dispersion}: For patient $p$, compute $\sigma_p^2 = \frac{1}{n_p} \sum_{x_i \in C_p} \norm{x_i - \mu_p}^2$ and monitor its variance across patients.
+  \item \textbf{Intra/inter ratio}: Define $\rho = \frac{\frac{1}{P} \sum_{p} \sigma_p}{\min_{p \neq q} \norm{\mu_p - \mu_q}}$; values $\rho < 0.5$ indicate strong patient signatures \citep{biel2001ecg}.
+  \item \textbf{Epochal drift}: Evaluate CH or DB on validation splits after each training epoch to detect collapse early.
+\end{enumerate}
+
+\section{Practical Recommendations}
+\begin{itemize}
+  \item \textbf{Use complementary indices}: Combine CH (global variance ratio), silhouette (pointwise reliability), and DB (worst-case cluster overlap) to capture different failure modes.
+  \item \textbf{Normalize embeddings}: Enforce $\ell_2$ normalization before distance computations to make indices comparable across training runs.
+  \item \textbf{Mitigate class-size imbalance}: Weight cluster contributions by $n_k$ when computing scatter to avoid dominance by prolific patients.
+  \item \textbf{Bootstrap uncertainty}: Estimate confidence intervals for each index via patient-wise resampling to quantify statistical significance.
+  \item \textbf{Align with clinical metadata}: Stratify indices by rhythm class or acquisition device to distinguish modeling errors from data heterogeneity.
+\end{itemize}
+
+\section{Conclusion}
+Distance-based clustering indices remain indispensable for validating ECG embeddings. Metrics such as Calinski--Harabasz, silhouette, Davies--Bouldin, Dunn, and Xie--Beni offer complementary perspectives on intra-cluster cohesion and inter-cluster separation. Proper normalization, resampling, and longitudinal monitoring ensure that patient-specific structure is preserved without suffering embedding collapse.
+
+\bibliographystyle{plainnat}
+\bibliography{embedding_cluster_evaluation}
+
+\end{document}
