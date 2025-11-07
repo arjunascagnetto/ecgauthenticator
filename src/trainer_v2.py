@@ -435,6 +435,7 @@ def main():
         print(f"EPOCH {epoch:3d} | Strategy: {mining_strategy:10s} | Patience: {patience_counter:2d}/{patience}")
         print("="*90)
         print(f"  Train Loss:     {train_loss:.6f}")
+        print(f"  Active Neg:     {train_active_neg_pct:.1f}%")
         print(f"  Intra dist:     {train_intra_dist:.4f}")
         print(f"  Inter dist:     {train_inter_dist:.4f}")
         print(f"  Margin:         {train_inter_dist - train_intra_dist:.4f}")
