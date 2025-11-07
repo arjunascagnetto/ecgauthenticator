@@ -367,6 +367,7 @@ def main():
         'train_active_neg_pct': [],
         'train_intra_dist': [],
         'train_inter_dist': [],
+        'train_dist_ratio': [],
         'val_ch': [],
         'val_db': []
     }
@@ -416,12 +417,15 @@ def main():
         db_score = val_metrics['db']
 
         # Salva metriche
+        dist_ratio = train_inter_dist / train_intra_dist if train_intra_dist > 0 else 0.0
+
         history['epoch'].append(epoch)
         history['mining_strategy'].append(mining_strategy)
         history['train_loss'].append(train_loss)
         history['train_active_neg_pct'].append(train_active_neg_pct)
         history['train_intra_dist'].append(train_intra_dist)
         history['train_inter_dist'].append(train_inter_dist)
+        history['train_dist_ratio'].append(dist_ratio)
         history['val_ch'].append(ch_score)
         history['val_db'].append(db_score)
 
@@ -433,10 +437,12 @@ def main():
         print(f"  Intra dist:     {train_intra_dist:.4f}")
         print(f"  Inter dist:     {train_inter_dist:.4f}")
         print(f"  Margin:         {train_inter_dist - train_intra_dist:.4f}")
+        print(f"  Ratio (I/i):    {dist_ratio:.2f}x")
         print(f"  Val CH:         {ch_score:.2f}")
         print(f"  Val DB:         {db_score:.2f}")
         print("="*90 + "\n")
 
+        logger.info(f"Distances - Intra: {train_intra_dist:.4f}, Inter: {train_inter_dist:.4f}, Ratio: {dist_ratio:.2f}x")
         logger.info(f"Val CH: {ch_score:.2f}, DB: {db_score:.2f}")
 
         # Salva modello ogni epoca
