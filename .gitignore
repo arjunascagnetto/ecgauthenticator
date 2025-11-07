@@ -13,10 +13,8 @@ logs/
 *.pt
 
 # Data
-data/ECG/*.csv
 data/MNIST/
-*.csv
-!train_configs.yaml
+# Note: train.csv, val.csv, test.csv are tracked in git
 
 # Python cache
 __pycache__/
