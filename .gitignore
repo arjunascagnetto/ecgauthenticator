@@ -1,55 +1,6 @@
-# Virtual environment
-.siamese/
-venv/
-env/
-
-# Training runs and models
-runs/
-runs_v2/
-models/
-results/
-logs/
-*.pth
-*.pt
-
-# Data
-data/MNIST/
-# Note: train.csv, val.csv, test.csv are tracked in git
-
-# Python cache
+# Ignore Python and data
 __pycache__/
 *.py[cod]
-*$py.class
-*.so
-.Python
-
-# IDE
-.vscode/
-.idea/
-*.swp
-*.swo
-
-# OS
-.DS_Store
-.DS_Store?
-._*
-.Spotlight-V100
-.Trashes
-ehthumbs.db
-Thumbs.db
-
-# Documentation compiled
-docs/*.pdf
-docs/*.aux
-docs/*.log
-docs/*.out
-docs/missfont.log
-
-# Jupyter
-.ipynb_checkpoints/
-*.ipynb
-
-# Temporary
-*.tmp
-*.temp
-discussione.txt
+data/
+runs_v2/
+nul
