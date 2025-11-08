@@ -3,7 +3,7 @@
 
 training:
   max_epochs: 50
-  patience: 10  # Early stopping patience
+  patience: 15  # Early stopping patience
 
 optimizer:
   learning_rate: 5.0e-4
@@ -12,7 +12,7 @@ optimizer:
   lr_scheduler_patience: 5
 
 loss:
-  margin: 1.0  # Contrastive loss margin
+  margin: 1.2  # Contrastive loss margin
 
 # Curriculum mining: 3 fasi
 mining:
@@ -28,7 +28,7 @@ batch:
 
 encoder:
   input_dim: 13
-  hidden_dims: [32, 64, 128]
+  hidden_dims: [32, 64]
   embedding_dim: 64
   dropout: 0.2
   normalize: true

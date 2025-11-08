@@ -7,6 +7,7 @@ import sys
 import json
 from pathlib import Path
 import pandas as pd
+import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.figure import Figure
@@ -118,6 +119,19 @@ class TrainingVisualizer(QMainWindow):
         except Exception as e:
             self.statusBar().showMessage(f"❌ Error loading run: {str(e)}")
 
+    def add_trend_line(self, ax, x, y, degree=2, color='black', alpha=0.5, linestyle='--', label='Trend'):
+        """Aggiunge linea di regressione polinomiale ai plot"""
+        if len(x) < 2:
+            return
+
+        # Fit polinomiale
+        z = np.polyfit(x, y, degree)
+        p = np.poly1d(z)
+        x_smooth = np.linspace(x.min(), x.max(), 100)
+        y_smooth = p(x_smooth)
+
+        ax.plot(x_smooth, y_smooth, color=color, linestyle=linestyle, alpha=alpha, linewidth=2, label=label)
+
     def plot_training_metrics(self):
         """Plotta le metriche di training"""
         if self.history_df is None:
@@ -134,6 +148,7 @@ class TrainingVisualizer(QMainWindow):
         # Plot 1: Training Loss
         ax = axes[0]
         ax.plot(epochs, self.history_df['train_loss'], 'b-', linewidth=2, label='Loss')
+        self.add_trend_line(ax, epochs, self.history_df['train_loss'].values, degree=2, color='darkblue', label='Trend')
         ax.set_xlabel('Epoch')
         ax.set_ylabel('Loss')
         ax.set_title('Training Loss')
@@ -143,6 +158,7 @@ class TrainingVisualizer(QMainWindow):
         # Plot 2: Intra distance
         ax = axes[1]
         ax.plot(epochs, self.history_df['train_intra_dist'], 'g-', linewidth=2, label='Intra')
+        self.add_trend_line(ax, epochs, self.history_df['train_intra_dist'].values, degree=2, color='darkgreen', label='Trend')
         ax.set_xlabel('Epoch')
         ax.set_ylabel('Distance')
         ax.set_title('Intra-Patient Distance (Same patient)')
@@ -152,6 +168,7 @@ class TrainingVisualizer(QMainWindow):
         # Plot 3: Inter distance
         ax = axes[2]
         ax.plot(epochs, self.history_df['train_inter_dist'], 'r-', linewidth=2, label='Inter')
+        self.add_trend_line(ax, epochs, self.history_df['train_inter_dist'].values, degree=2, color='darkred', label='Trend')
         ax.set_xlabel('Epoch')
         ax.set_ylabel('Distance')
         ax.set_title('Inter-Patient Distance (Different patient)')
@@ -161,7 +178,8 @@ class TrainingVisualizer(QMainWindow):
         # Plot 4: Distance Ratio
         ax = axes[3]
         ax.plot(epochs, self.history_df['train_dist_ratio'], 'm-', linewidth=2, label='Ratio')
-        ax.axhline(y=1.0, color='k', linestyle='--', alpha=0.5, label='Baseline (1.0x)')
+        self.add_trend_line(ax, epochs, self.history_df['train_dist_ratio'].values, degree=2, color='purple', label='Trend')
+        ax.axhline(y=1.0, color='k', linestyle=':', alpha=0.3, label='Baseline (1.0x)')
         ax.set_xlabel('Epoch')
         ax.set_ylabel('Ratio (Inter/Intra)')
         ax.set_title('Distance Ratio (higher is better)')
@@ -171,6 +189,7 @@ class TrainingVisualizer(QMainWindow):
         # Plot 5: Validation CH Score
         ax = axes[4]
         ax.plot(epochs, self.history_df['val_ch'], 'c-', linewidth=2, marker='o', markersize=4, label='CH')
+        self.add_trend_line(ax, epochs, self.history_df['val_ch'].values, degree=2, color='darkcyan', label='Trend')
         best_epoch = self.history_df.loc[self.history_df['val_ch'].idxmax(), 'epoch']
         best_ch = self.history_df['val_ch'].max()
         ax.axvline(x=best_epoch, color='g', linestyle='--', alpha=0.5, label=f'Best ({best_epoch:.0f})')
@@ -183,6 +202,7 @@ class TrainingVisualizer(QMainWindow):
         # Plot 6: Validation DB Index
         ax = axes[5]
         ax.plot(epochs, self.history_df['val_db'], 'orange', linewidth=2, marker='s', markersize=4, label='DB')
+        self.add_trend_line(ax, epochs, self.history_df['val_db'].values, degree=2, color='darkorange', label='Trend')
         best_db_epoch = self.history_df.loc[self.history_df['val_db'].idxmin(), 'epoch']
         best_db = self.history_df['val_db'].min()
         ax.axvline(x=best_db_epoch, color='g', linestyle='--', alpha=0.5, label=f'Best ({best_db_epoch:.0f})')
