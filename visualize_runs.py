@@ -33,6 +33,7 @@ class TrainingVisualizer(QMainWindow):
         self.current_run = None
         self.current_run_path = None
         self.history_df = None
+        self.results_json = None
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
         self.init_ui()
@@ -124,6 +125,50 @@ class TrainingVisualizer(QMainWindow):
         self.eval_results.setFont(QFont("Courier", 9))
         self.eval_layout.addWidget(self.eval_results)
 
+        # Tab 3: Best Epoch Stats
+        self.best_epoch_tab = QWidget()
+        self.best_epoch_layout = QVBoxLayout(self.best_epoch_tab)
+        self.tabs.addTab(self.best_epoch_tab, "Best Epoch Stats")
+
+        # Stats info
+        self.best_epoch_info = QLabel("Load a run to see best epoch stats")
+        self.best_epoch_info.setFont(QFont("Arial", 11, QFont.Bold))
+        self.best_epoch_layout.addWidget(self.best_epoch_info)
+
+        self.best_epoch_layout.addSpacing(10)
+
+        # Controls
+        best_controls_layout = QHBoxLayout()
+
+        best_controls_layout.addWidget(QLabel("Datasets:"))
+
+        self.best_train_cb = QCheckBox("Train")
+        self.best_train_cb.setChecked(True)
+        best_controls_layout.addWidget(self.best_train_cb)
+
+        self.best_val_cb = QCheckBox("Val")
+        self.best_val_cb.setChecked(True)
+        best_controls_layout.addWidget(self.best_val_cb)
+
+        self.best_test_cb = QCheckBox("Test")
+        self.best_test_cb.setChecked(True)
+        best_controls_layout.addWidget(self.best_test_cb)
+
+        best_controls_layout.addStretch()
+
+        self.best_eval_btn = QPushButton("Run Evaluation")
+        self.best_eval_btn.setMinimumWidth(120)
+        self.best_eval_btn.clicked.connect(self.run_best_epoch_evaluation)
+        best_controls_layout.addWidget(self.best_eval_btn)
+
+        self.best_epoch_layout.addLayout(best_controls_layout)
+
+        # Results text
+        self.best_epoch_results = QTextEdit()
+        self.best_epoch_results.setReadOnly(True)
+        self.best_epoch_results.setFont(QFont("Courier", 9))
+        self.best_epoch_layout.addWidget(self.best_epoch_results)
+
         # Status bar
         self.statusBar().showMessage("Ready")
 
@@ -162,6 +207,18 @@ class TrainingVisualizer(QMainWindow):
             self.history_df = pd.read_csv(history_file)
             self.current_run = run_name
             self.current_run_path = run_path
+
+            # Carica results
+            results_file = run_path / "results.json"
+            if results_file.exists():
+                with open(results_file, 'r') as f:
+                    self.results_json = json.load(f)
+                    best_epoch = self.results_json.get('best_epoch', 'N/A')
+                    best_ch = self.results_json.get('best_ch', 'N/A')
+                    final_db = self.results_json.get('final_db', 'N/A')
+
+                    info_text = f"Best Epoch: {best_epoch} | Best CH: {best_ch:.4f} | Final DB: {final_db:.4f}"
+                    self.best_epoch_info.setText(info_text)
 
             # Plotta
             self.plot_training_metrics()
@@ -430,6 +487,102 @@ class TrainingVisualizer(QMainWindow):
         top10_pct = (top10 / total) * 100 if total > 0 else 0
 
         return roc_auc, top1_pct, top5_pct, top10_pct
+
+    def run_best_epoch_evaluation(self):
+        """Esegue valutazione del modello sulla best epoch"""
+        if self.current_run_path is None or self.results_json is None:
+            self.statusBar().showMessage("❌ Nessuna run caricata")
+            return
+
+        best_epoch = self.results_json.get('best_epoch')
+        if best_epoch is None:
+            self.statusBar().showMessage("❌ Best epoch not found in results")
+            return
+
+        model_path = self.current_run_path / "models" / f"model_epoch_{best_epoch:04d}.pth"
+
+        if not model_path.exists():
+            self.statusBar().showMessage(f"❌ Model epoch {best_epoch} not found")
+            return
+
+        datasets = []
+        if self.best_train_cb.isChecked():
+            datasets.append(('train', 'data/ECG/train.csv'))
+        if self.best_val_cb.isChecked():
+            datasets.append(('val', 'data/ECG/val.csv'))
+        if self.best_test_cb.isChecked():
+            datasets.append(('test', 'data/ECG/test.csv'))
+
+        if not datasets:
+            self.statusBar().showMessage("❌ Seleziona almeno un dataset")
+            return
+
+        self.statusBar().showMessage(f"Computing evaluation for best epoch {best_epoch}...")
+        self.best_epoch_results.setText("Computing...\n")
+
+        try:
+            # Carica encoder dal config
+            from src.ecg_encoder import ECGEncoder
+
+            config_file = self.current_run_path.parent.parent / "train_config_v2.yaml"
+            with open(config_file, 'r') as f:
+                config = yaml.safe_load(f)
+
+            # Carica modello
+            encoder = ECGEncoder(
+                input_dim=config['encoder']['input_dim'],
+                hidden_dims=config['encoder'].get('hidden_dims', [20]),
+                embedding_dim=config['encoder']['embedding_dim'],
+                dropout=config['encoder']['dropout'],
+                normalize=config['encoder']['normalize']
+            ).to(self.device)
+
+            encoder.load_state_dict(torch.load(model_path, map_location=self.device))
+            encoder.eval()
+
+            results_text = f"=== Best Epoch {best_epoch} Evaluation ===\n\n"
+
+            for dataset_name, csv_path in datasets:
+                csv_full_path = Path(csv_path) if Path(csv_path).is_absolute() else self.current_run_path.parent.parent / csv_path
+
+                if not csv_full_path.exists():
+                    results_text += f"\n❌ {dataset_name}: File not found ({csv_full_path})\n"
+                    continue
+
+                # Carica dataset
+                df = pd.read_csv(csv_full_path)
+                feature_cols = [
+                    'VentricularRate', 'PRInterval', 'QRSDuration', 'QTInterval', 'QTCorrected',
+                    'PAxis', 'RAxis', 'TAxis', 'QOnset', 'QOffset', 'POnset', 'POffset', 'TOffset'
+                ]
+                features = df[feature_cols].values.astype(np.float32)
+                patient_ids = df['PatientID'].values
+
+                # Normalizza features
+                scaler_mean = features.mean(axis=0)
+                scaler_std = features.std(axis=0)
+                features = (features - scaler_mean) / (scaler_std + 1e-8)
+
+                # Calcola embeddings
+                embeddings = self._get_embeddings(encoder, features)
+
+                # Calcola metriche
+                roc_auc, top1, top5, top10 = self._compute_metrics(embeddings, patient_ids)
+
+                results_text += f"\n{'='*40}\n"
+                results_text += f"{dataset_name.upper()}\n"
+                results_text += f"{'='*40}\n"
+                results_text += f"ROC-AUC:       {roc_auc:.4f}\n"
+                results_text += f"Ranking@1:     {top1:.2f}%\n"
+                results_text += f"Ranking@5:     {top5:.2f}%\n"
+                results_text += f"Ranking@10:    {top10:.2f}%\n"
+
+            self.best_epoch_results.setText(results_text)
+            self.statusBar().showMessage(f"✓ Evaluation complete (best epoch {best_epoch})")
+
+        except Exception as e:
+            self.best_epoch_results.setText(f"❌ Error: {str(e)}")
+            self.statusBar().showMessage(f"❌ Error: {str(e)}")
 
 
 def main():
