@@ -5,17 +5,21 @@ Legge history.csv da runs_v2 e plotta metriche di training
 
 import sys
 import json
+import yaml
 from pathlib import Path
 import pandas as pd
 import numpy as np
+import torch
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.figure import Figure
+from sklearn.metrics import roc_auc_score
 from PyQt5.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
-    QComboBox, QPushButton, QTabWidget, QLabel, QStatusBar
+    QComboBox, QPushButton, QTabWidget, QLabel, QStatusBar, QCheckBox,
+    QTextEdit, QSpinBox
 )
-from PyQt5.QtCore import Qt
+from PyQt5.QtCore import Qt, QThread, pyqtSignal
 from PyQt5.QtGui import QFont
 
 
@@ -27,7 +31,9 @@ class TrainingVisualizer(QMainWindow):
 
         self.runs_dir = Path("runs_v2")
         self.current_run = None
+        self.current_run_path = None
         self.history_df = None
+        self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
         self.init_ui()
         self.load_runs()
@@ -73,6 +79,51 @@ class TrainingVisualizer(QMainWindow):
         self.canvas = FigureCanvas(self.figure)
         self.training_layout.addWidget(self.canvas)
 
+        # Tab 2: Evaluation
+        self.eval_tab = QWidget()
+        self.eval_layout = QVBoxLayout(self.eval_tab)
+        self.tabs.addTab(self.eval_tab, "Evaluation")
+
+        # Controls
+        controls_layout = QHBoxLayout()
+
+        controls_layout.addWidget(QLabel("Epoch:"))
+        self.epoch_spinbox = QSpinBox()
+        self.epoch_spinbox.setMinimum(1)
+        self.epoch_spinbox.setMaximum(50)
+        self.epoch_spinbox.setValue(1)
+        controls_layout.addWidget(self.epoch_spinbox)
+
+        controls_layout.addSpacing(20)
+        controls_layout.addWidget(QLabel("Datasets:"))
+
+        self.train_cb = QCheckBox("Train")
+        self.train_cb.setChecked(True)
+        controls_layout.addWidget(self.train_cb)
+
+        self.val_cb = QCheckBox("Val")
+        self.val_cb.setChecked(True)
+        controls_layout.addWidget(self.val_cb)
+
+        self.test_cb = QCheckBox("Test")
+        self.test_cb.setChecked(True)
+        controls_layout.addWidget(self.test_cb)
+
+        controls_layout.addStretch()
+
+        self.eval_btn = QPushButton("Run Evaluation")
+        self.eval_btn.setMinimumWidth(120)
+        self.eval_btn.clicked.connect(self.run_evaluation)
+        controls_layout.addWidget(self.eval_btn)
+
+        self.eval_layout.addLayout(controls_layout)
+
+        # Results text
+        self.eval_results = QTextEdit()
+        self.eval_results.setReadOnly(True)
+        self.eval_results.setFont(QFont("Courier", 9))
+        self.eval_layout.addWidget(self.eval_results)
+
         # Status bar
         self.statusBar().showMessage("Ready")
 
@@ -110,6 +161,7 @@ class TrainingVisualizer(QMainWindow):
             # Carica history
             self.history_df = pd.read_csv(history_file)
             self.current_run = run_name
+            self.current_run_path = run_path
 
             # Plotta
             self.plot_training_metrics()
@@ -217,6 +269,167 @@ class TrainingVisualizer(QMainWindow):
         self.figure.tight_layout()
 
         self.canvas.draw()
+
+    def run_evaluation(self):
+        """Esegue valutazione del modello su dataset selezionati"""
+        if self.current_run_path is None:
+            self.statusBar().showMessage("❌ Nessuna run caricata")
+            return
+
+        epoch = self.epoch_spinbox.value()
+        model_path = self.current_run_path / "models" / f"model_epoch_{epoch:04d}.pth"
+
+        if not model_path.exists():
+            self.statusBar().showMessage(f"❌ Model epoch {epoch} not found")
+            return
+
+        datasets = []
+        if self.train_cb.isChecked():
+            datasets.append(('train', 'data/ECG/train.csv'))
+        if self.val_cb.isChecked():
+            datasets.append(('val', 'data/ECG/val.csv'))
+        if self.test_cb.isChecked():
+            datasets.append(('test', 'data/ECG/test.csv'))
+
+        if not datasets:
+            self.statusBar().showMessage("❌ Seleziona almeno un dataset")
+            return
+
+        self.statusBar().showMessage(f"Computing evaluation for epoch {epoch}...")
+        self.eval_results.setText("Computing...\n")
+
+        try:
+            # Carica encoder dal config
+            from src.ecg_encoder import ECGEncoder
+
+            config_file = self.current_run_path.parent.parent / "train_config_v2.yaml"
+            import yaml
+            with open(config_file, 'r') as f:
+                config = yaml.safe_load(f)
+
+            # Carica modello
+            encoder = ECGEncoder(
+                input_dim=config['encoder']['input_dim'],
+                hidden_dims=config['encoder'].get('hidden_dims', [20]),
+                embedding_dim=config['encoder']['embedding_dim'],
+                dropout=config['encoder']['dropout'],
+                normalize=config['encoder']['normalize']
+            ).to(self.device)
+
+            encoder.load_state_dict(torch.load(model_path, map_location=self.device))
+            encoder.eval()
+
+            results_text = f"=== Evaluation Results - Epoch {epoch} ===\n\n"
+
+            for dataset_name, csv_path in datasets:
+                csv_full_path = Path(csv_path) if Path(csv_path).is_absolute() else self.current_run_path.parent.parent / csv_path
+
+                if not csv_full_path.exists():
+                    results_text += f"\n❌ {dataset_name}: File not found ({csv_full_path})\n"
+                    continue
+
+                # Carica dataset
+                df = pd.read_csv(csv_full_path)
+                feature_cols = [
+                    'VentricularRate', 'PRInterval', 'QRSDuration', 'QTInterval', 'QTCorrected',
+                    'PAxis', 'RAxis', 'TAxis', 'QOnset', 'QOffset', 'POnset', 'POffset', 'TOffset'
+                ]
+                features = df[feature_cols].values.astype(np.float32)
+                patient_ids = df['PatientID'].values
+
+                # Normalizza features (usando scaler da training)
+                scaler_mean = features.mean(axis=0)
+                scaler_std = features.std(axis=0)
+                features = (features - scaler_mean) / (scaler_std + 1e-8)
+
+                # Calcola embeddings
+                embeddings = self._get_embeddings(encoder, features)
+
+                # Calcola metriche
+                roc_auc, top1, top5, top10 = self._compute_metrics(embeddings, patient_ids)
+
+                results_text += f"\n{'='*40}\n"
+                results_text += f"{dataset_name.upper()}\n"
+                results_text += f"{'='*40}\n"
+                results_text += f"ROC-AUC:       {roc_auc:.4f}\n"
+                results_text += f"Ranking@1:     {top1:.2f}%\n"
+                results_text += f"Ranking@5:     {top5:.2f}%\n"
+                results_text += f"Ranking@10:    {top10:.2f}%\n"
+
+            self.eval_results.setText(results_text)
+            self.statusBar().showMessage(f"✓ Evaluation complete")
+
+        except Exception as e:
+            self.eval_results.setText(f"❌ Error: {str(e)}")
+            self.statusBar().showMessage(f"❌ Error: {str(e)}")
+
+    @torch.no_grad()
+    def _get_embeddings(self, encoder, features, batch_size=256):
+        """Calcola embeddings per tutte le features"""
+        all_embeddings = []
+
+        for batch_start in range(0, len(features), batch_size):
+            batch_end = min(batch_start + batch_size, len(features))
+            batch_features = features[batch_start:batch_end]
+
+            x = torch.from_numpy(batch_features).float().to(self.device)
+            embeddings = encoder(x).cpu().numpy()
+            all_embeddings.extend(embeddings)
+
+        return np.array(all_embeddings)
+
+    def _compute_metrics(self, embeddings, patient_ids):
+        """Calcola ROC-AUC e ranking accuracy"""
+        # Crea coppie
+        distances = []
+        labels = []
+
+        unique_patients = np.unique(patient_ids)
+
+        for i in range(len(embeddings)):
+            for j in range(i + 1, len(embeddings)):
+                dist = np.linalg.norm(embeddings[i] - embeddings[j])
+                label = 1 if patient_ids[i] == patient_ids[j] else 0
+
+                distances.append(dist)
+                labels.append(label)
+
+        distances = np.array(distances)
+        labels = np.array(labels)
+
+        # ROC-AUC (invertire distanze: più piccola = più simile)
+        scores = -distances  # Negative per roc_auc (higher score = positive)
+        roc_auc = roc_auc_score(labels, scores)
+
+        # Ranking accuracy
+        top1, top5, top10 = 0, 0, 0
+        total = 0
+
+        for i in range(len(embeddings)):
+            query_emb = embeddings[i]
+            query_patient = patient_ids[i]
+
+            # Calcola distanze con tutti gli altri
+            dists = [np.linalg.norm(query_emb - embeddings[j]) for j in range(len(embeddings))]
+            sorted_indices = np.argsort(dists)
+
+            # Skipping self (primo elemento è se stesso con distanza 0)
+            ranking = patient_ids[sorted_indices[1:]]
+
+            if ranking[0] == query_patient:
+                top1 += 1
+            if query_patient in ranking[:5]:
+                top5 += 1
+            if query_patient in ranking[:10]:
+                top10 += 1
+
+            total += 1
+
+        top1_pct = (top1 / total) * 100 if total > 0 else 0
+        top5_pct = (top5 / total) * 100 if total > 0 else 0
+        top10_pct = (top10 / total) * 100 if total > 0 else 0
+
+        return roc_auc, top1_pct, top5_pct, top10_pct
 
 
 def main():

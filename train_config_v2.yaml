@@ -16,8 +16,8 @@ loss:
 
 # Curriculum mining: 3 fasi
 mining:
-  random_epochs: 10       # Epoch 1-10: random mining
-  semihard_epochs: 25     # Epoch 11-25: semi-hard mining
+  random_epochs: 5      # Epoch 1-10: random mining
+  semihard_epochs: 15     # Epoch 11-25: semi-hard mining
   hardmining_epochs: 50  # Epoch 26-100: hard mining
 
 # PK sampling per batch
