@@ -35,6 +35,7 @@ class TrainingVisualizer(QMainWindow):
         self.history_df = None
         self.results_json = None
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        self.stop_evaluation = False
 
         self.init_ui()
         self.load_runs()
@@ -130,6 +131,12 @@ class TrainingVisualizer(QMainWindow):
         self.eval_btn.clicked.connect(self.run_evaluation)
         controls_layout.addWidget(self.eval_btn)
 
+        self.stop_eval_btn = QPushButton("Stop Evaluation")
+        self.stop_eval_btn.setMinimumWidth(120)
+        self.stop_eval_btn.setEnabled(False)
+        self.stop_eval_btn.clicked.connect(self.stop_evaluation_clicked)
+        controls_layout.addWidget(self.stop_eval_btn)
+
         self.eval_layout.addLayout(controls_layout)
 
         # Results text
@@ -186,6 +193,12 @@ class TrainingVisualizer(QMainWindow):
         self.best_eval_btn.setMinimumWidth(120)
         self.best_eval_btn.clicked.connect(self.run_best_epoch_evaluation)
         best_controls_layout.addWidget(self.best_eval_btn)
+
+        self.best_stop_eval_btn = QPushButton("Stop Evaluation")
+        self.best_stop_eval_btn.setMinimumWidth(120)
+        self.best_stop_eval_btn.setEnabled(False)
+        self.best_stop_eval_btn.clicked.connect(self.stop_evaluation_clicked)
+        best_controls_layout.addWidget(self.best_stop_eval_btn)
 
         self.best_epoch_layout.addLayout(best_controls_layout)
 
@@ -353,6 +366,11 @@ class TrainingVisualizer(QMainWindow):
 
         self.canvas.draw()
 
+    def stop_evaluation_clicked(self):
+        """Arresta la valutazione in corso"""
+        self.stop_evaluation = True
+        self.statusBar().showMessage("Stopping evaluation...")
+
     def run_evaluation(self):
         """Esegue valutazione del modello su dataset selezionati"""
         if self.current_run_path is None:
@@ -377,6 +395,10 @@ class TrainingVisualizer(QMainWindow):
         if not datasets:
             self.statusBar().showMessage("❌ Seleziona almeno un dataset")
             return
+
+        self.stop_evaluation = False
+        self.eval_btn.setEnabled(False)
+        self.stop_eval_btn.setEnabled(True)
 
         self.statusBar().showMessage(f"Computing evaluation for epoch {epoch}...")
         self.eval_results.setText("Computing...\n")
@@ -407,6 +429,9 @@ class TrainingVisualizer(QMainWindow):
             results_text += f"Sampling: {sampling_str}\n\n"
 
             for dataset_name, csv_path in datasets:
+                if self.stop_evaluation:
+                    break
+
                 csv_full_path = Path(csv_path) if Path(csv_path).is_absolute() else self.current_run_path.parent.parent / csv_path
 
                 if not csv_full_path.exists():
@@ -445,11 +470,18 @@ class TrainingVisualizer(QMainWindow):
                 results_text += f"Ranking@10:    {top10:.2f}%\n"
 
             self.eval_results.setText(results_text)
-            self.statusBar().showMessage(f"✓ Evaluation complete")
+            if self.stop_evaluation:
+                self.statusBar().showMessage("Evaluation stopped by user")
+            else:
+                self.statusBar().showMessage(f"✓ Evaluation complete")
 
         except Exception as e:
             self.eval_results.setText(f"❌ Error: {str(e)}")
             self.statusBar().showMessage(f"❌ Error: {str(e)}")
+
+        finally:
+            self.eval_btn.setEnabled(True)
+            self.stop_eval_btn.setEnabled(False)
 
     @torch.no_grad()
     def _get_embeddings(self, encoder, features, batch_size=256):
@@ -502,6 +534,9 @@ class TrainingVisualizer(QMainWindow):
         unique_patients = np.unique(patient_ids)
 
         for i in range(len(embeddings)):
+            if self.stop_evaluation:
+                break
+
             for j in range(i + 1, len(embeddings)):
                 dist = np.linalg.norm(embeddings[i] - embeddings[j])
                 label = 1 if patient_ids[i] == patient_ids[j] else 0
@@ -521,6 +556,9 @@ class TrainingVisualizer(QMainWindow):
         total = 0
 
         for i in range(len(embeddings)):
+            if self.stop_evaluation:
+                break
+
             query_emb = embeddings[i]
             query_patient = patient_ids[i]
 
@@ -575,6 +613,10 @@ class TrainingVisualizer(QMainWindow):
             self.statusBar().showMessage("❌ Seleziona almeno un dataset")
             return
 
+        self.stop_evaluation = False
+        self.best_eval_btn.setEnabled(False)
+        self.best_stop_eval_btn.setEnabled(True)
+
         self.statusBar().showMessage(f"Computing evaluation for best epoch {best_epoch}...")
         self.best_epoch_results.setText("Computing...\n")
 
@@ -603,6 +645,9 @@ class TrainingVisualizer(QMainWindow):
             results_text += f"Sampling: {sampling_str}\n\n"
 
             for dataset_name, csv_path in datasets:
+                if self.stop_evaluation:
+                    break
+
                 csv_full_path = Path(csv_path) if Path(csv_path).is_absolute() else self.current_run_path.parent.parent / csv_path
 
                 if not csv_full_path.exists():
@@ -641,11 +686,18 @@ class TrainingVisualizer(QMainWindow):
                 results_text += f"Ranking@10:    {top10:.2f}%\n"
 
             self.best_epoch_results.setText(results_text)
-            self.statusBar().showMessage(f"✓ Evaluation complete (best epoch {best_epoch})")
+            if self.stop_evaluation:
+                self.statusBar().showMessage("Evaluation stopped by user")
+            else:
+                self.statusBar().showMessage(f"✓ Evaluation complete (best epoch {best_epoch})")
 
         except Exception as e:
             self.best_epoch_results.setText(f"❌ Error: {str(e)}")
             self.statusBar().showMessage(f"❌ Error: {str(e)}")
+
+        finally:
+            self.best_eval_btn.setEnabled(True)
+            self.best_stop_eval_btn.setEnabled(False)
 
 
 def main():
