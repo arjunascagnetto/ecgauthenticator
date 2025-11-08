@@ -107,7 +107,7 @@ def get_mining_strategy(epoch, config_mining):
 
 
 def create_pairs_batch(batch_indices, features, patient_ids, device, mining_strategy="random",
-                       embeddings=None, margin=2.0):
+                       embeddings=None, margin=1.2):
     """
     Crea pairs per batch.
     Per random mining: genera pairs random nel batch
@@ -178,7 +178,7 @@ def create_pairs_batch(batch_indices, features, patient_ids, device, mining_stra
 
 
 def train_epoch(encoder, loss_fn, optimizer, features, patient_ids, batch_indices_list,
-                device, mining_strategy="random", embeddings=None, margin=2.0):
+                device, mining_strategy="random", embeddings=None, margin=1.2):
     """Train un'epoca"""
     encoder.train()
     total_loss = 0.0
@@ -192,7 +192,7 @@ def train_epoch(encoder, loss_fn, optimizer, features, patient_ids, batch_indice
 
     for batch_indices in pbar:
         anchors, others, labels = create_pairs_batch(
-            batch_indices, features, patient_ids, device, mining_strategy, embeddings, margin)
+            batch_indices, features, patient_ids, device, mining_strategy, embeddings, margin=margin)
 
         optimizer.zero_grad()
 
@@ -223,6 +223,23 @@ def train_epoch(encoder, loss_fn, optimizer, features, patient_ids, batch_indice
     avg_inter_dist = total_inter_dist / num_batches if num_batches > 0 else 0.0
 
     return avg_loss, avg_active_neg_pct, avg_intra_dist, avg_inter_dist
+
+
+@torch.no_grad()
+def get_embeddings(encoder, features, device, batch_size=256):
+    """Calcola embeddings per tutte le features"""
+    encoder.eval()
+    all_embeddings = []
+
+    for batch_start in range(0, len(features), batch_size):
+        batch_end = min(batch_start + batch_size, len(features))
+        batch_features = features[batch_start:batch_end]
+
+        x = torch.from_numpy(batch_features).float().to(device)
+        embeddings = encoder(x).cpu().numpy()
+        all_embeddings.extend(embeddings)
+
+    return np.array(all_embeddings)
 
 
 @torch.no_grad()
@@ -384,6 +401,9 @@ def main():
     print(f"Device: {device}")
     print("="*90 + "\n")
 
+    # Inizializza embeddings per curriculum mining
+    train_embeddings = None
+
     for epoch in range(1, num_epochs + 1):
         # Check graceful shutdown request
         if shutdown_requested:
@@ -406,10 +426,14 @@ def main():
         # Train
         train_loss, train_active_neg_pct, train_intra_dist, train_inter_dist = train_epoch(
             encoder, loss_fn, optimizer, train_features, train_patient_ids,
-            batch_indices_list, device, mining_strategy
+            batch_indices_list, device, mining_strategy, train_embeddings,
+            margin=config['loss']['margin']
         )
 
         logger.info(f"Epoch {epoch} - Loss: {train_loss:.6f}, Intra: {train_intra_dist:.4f}, Inter: {train_inter_dist:.4f}")
+
+        # Calcola embeddings per prossima epoca (curriculum mining)
+        train_embeddings = get_embeddings(encoder, train_features, device)
 
         # Validate
         val_metrics, val_embeddings = validate(encoder, val_dataset, device)
