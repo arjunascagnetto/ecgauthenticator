@@ -110,6 +110,19 @@ class TrainingVisualizer(QMainWindow):
         self.test_cb.setChecked(True)
         controls_layout.addWidget(self.test_cb)
 
+        controls_layout.addSpacing(20)
+        controls_layout.addWidget(QLabel("Sampling:"))
+        self.sampling_combo = QComboBox()
+        self.sampling_combo.addItems([
+            "All samples",
+            "1000 samples",
+            "2000 samples",
+            "5000 samples",
+            "10000 samples",
+            "Random patients (all exams)"
+        ])
+        controls_layout.addWidget(self.sampling_combo)
+
         controls_layout.addStretch()
 
         self.eval_btn = QPushButton("Run Evaluation")
@@ -153,6 +166,19 @@ class TrainingVisualizer(QMainWindow):
         self.best_test_cb = QCheckBox("Test")
         self.best_test_cb.setChecked(True)
         best_controls_layout.addWidget(self.best_test_cb)
+
+        best_controls_layout.addSpacing(20)
+        best_controls_layout.addWidget(QLabel("Sampling:"))
+        self.best_sampling_combo = QComboBox()
+        self.best_sampling_combo.addItems([
+            "All samples",
+            "1000 samples",
+            "2000 samples",
+            "5000 samples",
+            "10000 samples",
+            "Random patients (all exams)"
+        ])
+        best_controls_layout.addWidget(self.best_sampling_combo)
 
         best_controls_layout.addStretch()
 
@@ -376,7 +402,9 @@ class TrainingVisualizer(QMainWindow):
             encoder.load_state_dict(torch.load(model_path, map_location=self.device))
             encoder.eval()
 
-            results_text = f"=== Evaluation Results - Epoch {epoch} ===\n\n"
+            sampling_str = self.sampling_combo.currentText()
+            results_text = f"=== Evaluation Results - Epoch {epoch} ===\n"
+            results_text += f"Sampling: {sampling_str}\n\n"
 
             for dataset_name, csv_path in datasets:
                 csv_full_path = Path(csv_path) if Path(csv_path).is_absolute() else self.current_run_path.parent.parent / csv_path
@@ -402,8 +430,11 @@ class TrainingVisualizer(QMainWindow):
                 # Calcola embeddings
                 embeddings = self._get_embeddings(encoder, features)
 
+                # Campionamento
+                sample_indices = self._get_sample_indices(embeddings, patient_ids, sampling_str)
+
                 # Calcola metriche
-                roc_auc, top1, top5, top10 = self._compute_metrics(embeddings, patient_ids)
+                roc_auc, top1, top5, top10 = self._compute_metrics(embeddings, patient_ids, sample_indices)
 
                 results_text += f"\n{'='*40}\n"
                 results_text += f"{dataset_name.upper()}\n"
@@ -435,8 +466,35 @@ class TrainingVisualizer(QMainWindow):
 
         return np.array(all_embeddings)
 
-    def _compute_metrics(self, embeddings, patient_ids):
+    def _get_sample_indices(self, embeddings, patient_ids, sampling_str):
+        """Ritorna indici campionati in base alla scelta"""
+        total_samples = len(embeddings)
+
+        if sampling_str == "All samples":
+            return np.arange(total_samples)
+
+        elif sampling_str == "Random patients (all exams)":
+            # Seleziona N pazienti casuali, prendi TUTTI i loro esami
+            unique_patients = np.unique(patient_ids)
+            num_patients = max(1, len(unique_patients) // 4)  # ~25% dei pazienti
+            selected_patients = np.random.choice(unique_patients, num_patients, replace=False)
+            indices = np.where(np.isin(patient_ids, selected_patients))[0]
+            return indices
+
+        else:
+            # Numero di sample (1000, 2000, 5000, 10000)
+            sample_size = int(sampling_str.split()[0])
+            sample_size = min(sample_size, total_samples)
+            indices = np.random.choice(total_samples, sample_size, replace=False)
+            return indices
+
+    def _compute_metrics(self, embeddings, patient_ids, sample_indices=None):
         """Calcola ROC-AUC e ranking accuracy"""
+        # Usa campionamento se specificato
+        if sample_indices is not None:
+            embeddings = embeddings[sample_indices]
+            patient_ids = patient_ids[sample_indices]
+
         # Crea coppie
         distances = []
         labels = []
@@ -540,7 +598,9 @@ class TrainingVisualizer(QMainWindow):
             encoder.load_state_dict(torch.load(model_path, map_location=self.device))
             encoder.eval()
 
-            results_text = f"=== Best Epoch {best_epoch} Evaluation ===\n\n"
+            sampling_str = self.best_sampling_combo.currentText()
+            results_text = f"=== Best Epoch {best_epoch} Evaluation ===\n"
+            results_text += f"Sampling: {sampling_str}\n\n"
 
             for dataset_name, csv_path in datasets:
                 csv_full_path = Path(csv_path) if Path(csv_path).is_absolute() else self.current_run_path.parent.parent / csv_path
@@ -566,8 +626,11 @@ class TrainingVisualizer(QMainWindow):
                 # Calcola embeddings
                 embeddings = self._get_embeddings(encoder, features)
 
+                # Campionamento
+                sample_indices = self._get_sample_indices(embeddings, patient_ids, sampling_str)
+
                 # Calcola metriche
-                roc_auc, top1, top5, top10 = self._compute_metrics(embeddings, patient_ids)
+                roc_auc, top1, top5, top10 = self._compute_metrics(embeddings, patient_ids, sample_indices)
 
                 results_text += f"\n{'='*40}\n"
                 results_text += f"{dataset_name.upper()}\n"
