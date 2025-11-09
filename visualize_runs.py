@@ -208,6 +208,17 @@ class TrainingVisualizer(QMainWindow):
         self.best_epoch_results.setFont(QFont("Courier", 9))
         self.best_epoch_layout.addWidget(self.best_epoch_results)
 
+        # Tab 4: Config
+        self.config_tab = QWidget()
+        self.config_layout = QVBoxLayout(self.config_tab)
+        self.tabs.addTab(self.config_tab, "Config")
+
+        # Config text
+        self.config_text = QTextEdit()
+        self.config_text.setReadOnly(True)
+        self.config_text.setFont(QFont("Courier", 9))
+        self.config_layout.addWidget(self.config_text)
+
         # Status bar
         self.statusBar().showMessage("Ready")
 
@@ -258,6 +269,19 @@ class TrainingVisualizer(QMainWindow):
 
                     info_text = f"Best Epoch: {best_epoch} | Best CH: {best_ch:.4f} | Final DB: {final_db:.4f}"
                     self.best_epoch_info.setText(info_text)
+
+            # Carica config
+            config_files = list(run_path.glob("config_*.yaml"))
+            if config_files:
+                config_file = config_files[0]
+                try:
+                    with open(config_file, 'r') as f:
+                        config_content = f.read()
+                    self.config_text.setText(config_content)
+                except Exception as e:
+                    self.config_text.setText(f"Error loading config: {str(e)}")
+            else:
+                self.config_text.setText("Config file not found in run directory")
 
             # Plotta
             self.plot_training_metrics()

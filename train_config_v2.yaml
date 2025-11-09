@@ -2,7 +2,7 @@
 # Curriculum mining: random → semi-hard → hard
 
 training:
-  max_epochs: 50
+  max_epochs: 100
   patience: 15  # Early stopping patience
 
 optimizer:
@@ -18,7 +18,7 @@ loss:
 mining:
   random_epochs: 5      # Epoch 1-10: random mining
   semihard_epochs: 15     # Epoch 11-25: semi-hard mining
-  hardmining_epochs: 50  # Epoch 26-100: hard mining
+  hardmining_epochs: 100  # Epoch 26-100: hard mining
 
 # PK sampling per batch
 batch:
@@ -28,7 +28,7 @@ batch:
 
 encoder:
   input_dim: 13
-  hidden_dims: [32, 64]
+  hidden_dims: [32, 64, 128]
   embedding_dim: 64
   dropout: 0.2
   normalize: true
