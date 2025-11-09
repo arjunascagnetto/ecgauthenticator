@@ -52,9 +52,10 @@ def signal_handler(signum, frame):
 
 class ContrastiveLoss(nn.Module):
     """Contrastive loss con margin"""
-    def __init__(self, margin=1.0):
+    def __init__(self, margin):
         super(ContrastiveLoss, self).__init__()
         self.margin = margin
+        logger.info(f"ContrastiveLoss initialized with margin={margin}")
 
     def forward(self, anchor, positive, labels):
         """
@@ -93,7 +94,7 @@ class ContrastiveLoss(nn.Module):
 
 
 def get_mining_strategy(epoch, config_mining):
-    """Ritorna mining strategy per epoch"""
+    """Ritorna mining strategy per epoch (negative mining)"""
     random_epochs = config_mining['random_epochs']
     semihard_epochs = config_mining['semihard_epochs']
     hardmining_epochs = config_mining['hardmining_epochs']
@@ -106,12 +107,24 @@ def get_mining_strategy(epoch, config_mining):
         return "hard"
 
 
+def get_positive_mining_strategy(epoch, config_mining):
+    """Ritorna positive mining strategy per epoch"""
+    positive_random_epochs = config_mining.get('positive_random_epochs', 10)
+    # positive_hard_epochs = config_mining.get('positive_hard_epochs', 100)
+
+    if epoch <= positive_random_epochs:
+        return "random"
+    else:
+        return "hard"
+
+
 def create_pairs_batch(batch_indices, features, patient_ids, device, mining_strategy="random",
-                       embeddings=None, margin=1.2):
+                       positive_mining_strategy="random", embeddings=None, margin=None):
     """
     Crea pairs per batch.
-    Per random mining: genera pairs random nel batch
-    Per semi-hard/hard: usa embeddings per selezionare pairs
+
+    Negative mining: random, semi-hard o hard basato su embeddings
+    Positive mining: random (casuale) o hard (più lontano dal positivo)
     """
     batch_patient_ids = patient_ids[batch_indices]
     batch_features = features[batch_indices]
@@ -129,7 +142,26 @@ def create_pairs_batch(batch_indices, features, patient_ids, device, mining_stra
         pos_indices = pos_indices[pos_indices != i]
 
         if len(pos_indices) > 0:
-            pos_i = np.random.choice(pos_indices)
+            # Scegli positivo basato su strategia
+            if positive_mining_strategy == "random":
+                pos_i = np.random.choice(pos_indices)
+            else:  # hard
+                # Hard positive: scegli il positivo più lontano
+                if embeddings is not None:
+                    anchor_emb = embeddings[idx]
+                    pos_distances = []
+                    for pos_i_candidate in pos_indices:
+                        pos_idx = batch_indices[pos_i_candidate]
+                        d = np.linalg.norm(embeddings[pos_idx] - anchor_emb)
+                        pos_distances.append((d, pos_i_candidate))
+
+                    # Hardest positive: massima distanza
+                    pos_distances.sort()
+                    pos_i = pos_distances[-1][1]
+                else:
+                    # Se no embeddings, fallback a random
+                    pos_i = np.random.choice(pos_indices)
+
             anchors.append(batch_features[i])
             others.append(batch_features[pos_i])
             labels.append(0)  # positivo
@@ -178,7 +210,8 @@ def create_pairs_batch(batch_indices, features, patient_ids, device, mining_stra
 
 
 def train_epoch(encoder, loss_fn, optimizer, features, patient_ids, batch_indices_list,
-                device, mining_strategy="random", embeddings=None, margin=1.2):
+                device, mining_strategy="random", positive_mining_strategy="random",
+                embeddings=None, margin=None):
     """Train un'epoca"""
     encoder.train()
     total_loss = 0.0
@@ -192,7 +225,8 @@ def train_epoch(encoder, loss_fn, optimizer, features, patient_ids, batch_indice
 
     for batch_indices in pbar:
         anchors, others, labels = create_pairs_batch(
-            batch_indices, features, patient_ids, device, mining_strategy, embeddings, margin=margin)
+            batch_indices, features, patient_ids, device, mining_strategy,
+            positive_mining_strategy=positive_mining_strategy, embeddings=embeddings, margin=margin)
 
         optimizer.zero_grad()
 
@@ -226,7 +260,7 @@ def train_epoch(encoder, loss_fn, optimizer, features, patient_ids, batch_indice
 
 
 @torch.no_grad()
-def get_embeddings(encoder, features, device, batch_size=256):
+def get_embeddings(encoder, features, device, batch_size):
     """Calcola embeddings per tutte le features"""
     encoder.eval()
     all_embeddings = []
@@ -243,11 +277,17 @@ def get_embeddings(encoder, features, device, batch_size=256):
 
 
 @torch.no_grad()
-def validate(encoder, loss_fn, val_dataset, device, sample_size=5000, margin=1.2):
+def validate(encoder, loss_fn, val_dataset, device, sample_size=None, margin=None,
+             positive_mining_strategy="random", batch_size=None):
     """Valida e ritorna metriche: loss, intra_dist, inter_dist, dist_ratio, active_neg_pct, CH, DB"""
     encoder.eval()
 
-    print(f"Computing embeddings for validation...")
+    if sample_size is None:
+        sample_size = len(val_dataset.features)
+    if batch_size is None:
+        batch_size = 256  # Fallback (should not happen with proper config)
+
+    print(f"Computing embeddings for validation (sample_size={sample_size}, batch_size={batch_size})...")
 
     # Sample
     indices = np.random.choice(len(val_dataset.features),
@@ -257,7 +297,6 @@ def validate(encoder, loss_fn, val_dataset, device, sample_size=5000, margin=1.2
     all_embeddings = []
     all_patient_ids = []
 
-    batch_size = 256
     for batch_start in tqdm(range(0, len(indices), batch_size),
                             desc="Generating embeddings", position=0, leave=True, ncols=100):
         batch_end = min(batch_start + batch_size, len(indices))
@@ -283,10 +322,10 @@ def validate(encoder, loss_fn, val_dataset, device, sample_size=5000, margin=1.2
     total_inter_dist = 0.0
 
     # Crea batch pairs come nel training
-    batch_indices_list = list(range(0, len(all_embeddings), 256))
+    batch_indices_list = list(range(0, len(all_embeddings), batch_size))
 
     for batch_start_idx in tqdm(batch_indices_list[:10], desc="Computing loss", position=0, leave=True, ncols=100):  # Usa solo 10 batch per velocità
-        batch_end_idx = min(batch_start_idx + 256, len(all_embeddings))
+        batch_end_idx = min(batch_start_idx + batch_size, len(all_embeddings))
         batch_indices = np.arange(batch_start_idx, batch_end_idx)
 
         batch_embeddings = all_embeddings[batch_indices]
@@ -306,7 +345,21 @@ def validate(encoder, loss_fn, val_dataset, device, sample_size=5000, margin=1.2
             pos_indices = pos_indices[pos_indices != i]
 
             if len(pos_indices) > 0:
-                pos_i = np.random.choice(pos_indices)
+                # Scegli positivo basato su strategia
+                if positive_mining_strategy == "random":
+                    pos_i = np.random.choice(pos_indices)
+                else:  # hard
+                    # Hard positive: scegli il positivo più lontano
+                    anchor_emb = batch_embeddings[i]
+                    pos_distances = []
+                    for pos_i_candidate in pos_indices:
+                        d = np.linalg.norm(batch_embeddings[pos_i_candidate] - anchor_emb)
+                        pos_distances.append((d, pos_i_candidate))
+
+                    # Hardest positive: massima distanza
+                    pos_distances.sort()
+                    pos_i = pos_distances[-1][1]
+
                 anchors.append(batch_embeddings[i])
                 others.append(batch_embeddings[pos_i])
                 labels.append(0)
@@ -450,7 +503,8 @@ def main():
     )
 
     logger.info(f"Encoder: {encoder}")
-    logger.info(f"Loss: Contrastive (margin={config['loss']['margin']})")
+    margin_value = config['loss']['margin']
+    logger.info(f"Loss: Contrastive (margin={margin_value})")
 
     # Training loop
     best_ch = 0.0
@@ -494,9 +548,10 @@ def main():
             logger.info(f"Graceful shutdown at epoch {epoch}")
             break
 
-        # Mining strategy
+        # Mining strategies
         mining_strategy = get_mining_strategy(epoch, config['mining'])
-        logger.info(f"Epoch {epoch} - Mining: {mining_strategy}")
+        positive_mining_strategy = get_positive_mining_strategy(epoch, config['mining'])
+        logger.info(f"Epoch {epoch} - Mining: {mining_strategy} (neg), {positive_mining_strategy} (pos)")
 
         # PK Sampler
         pk_sampler = PKSampler(
@@ -510,18 +565,25 @@ def main():
         # Train
         train_loss, train_active_neg_pct, train_intra_dist, train_inter_dist = train_epoch(
             encoder, loss_fn, optimizer, train_features, train_patient_ids,
-            batch_indices_list, device, mining_strategy, train_embeddings,
+            batch_indices_list, device, mining_strategy, positive_mining_strategy,
+            train_embeddings,
             margin=config['loss']['margin']
         )
 
         logger.info(f"Epoch {epoch} - Loss: {train_loss:.6f}, Intra: {train_intra_dist:.4f}, Inter: {train_inter_dist:.4f}")
 
+        # Calcola batch_size dinamicamente da config (P * K)
+        batch_size = config['batch']['num_patients'] * config['batch']['num_ecg']
+
         # Calcola embeddings per prossima epoca (curriculum mining)
-        train_embeddings = get_embeddings(encoder, train_features, device)
+        train_embeddings = get_embeddings(encoder, train_features, device, batch_size=batch_size)
 
         # Validate
+        sample_size = config['evaluation'].get('sample_size', 5000)
         val_metrics, val_embeddings = validate(encoder, loss_fn, val_dataset, device,
-                                               sample_size=5000, margin=config['loss']['margin'])
+                                               sample_size=sample_size, margin=config['loss']['margin'],
+                                               positive_mining_strategy=positive_mining_strategy,
+                                               batch_size=batch_size)
 
         ch_score = val_metrics['ch']
         db_score = val_metrics['db']

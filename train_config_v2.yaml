@@ -12,18 +12,27 @@ optimizer:
   lr_scheduler_patience: 5
 
 loss:
-  margin: 1.2  # Contrastive loss margin
+  margin: 0.5  # Contrastive loss margin
+
+# Evaluation parameters
+evaluation:
+  sample_size: 5000    # Number of samples from validation set for faster evaluation
 
 # Curriculum mining: 3 fasi
 mining:
-  random_epochs: 5      # Epoch 1-10: random mining
-  semihard_epochs: 15     # Epoch 11-25: semi-hard mining
-  hardmining_epochs: 100  # Epoch 26-100: hard mining
+  # Negative mining strategy
+  random_epochs: 5      # Epoch 1-5: random mining
+  semihard_epochs: 20     # Epoch 6-20: semi-hard mining
+  hardmining_epochs: 100  # Epoch 21-100: hard mining
+
+  # Positive mining strategy (progressive)
+  positive_random_epochs: 10   # Epoch 1-10: random positive (one random per anchor)
+  positive_hard_epochs: 100    # Epoch 11-100: hard positive (hardest per anchor)
 
 # PK sampling per batch
 batch:
-  num_patients: 64  # P: numero pazienti per batch
-  num_ecg: 4        # K: numero ECG per paziente
+  num_patients: 32  # P: numero pazienti per batch
+  num_ecg: 8        # K: numero ECG per paziente
   # Batch size = 64 * 4 = 256
 
 encoder:
