@@ -456,6 +456,8 @@ class TrainingVisualizer(QMainWindow):
                 if self.stop_evaluation:
                     break
 
+                QApplication.processEvents()
+
                 csv_full_path = Path(csv_path) if Path(csv_path).is_absolute() else self.current_run_path.parent.parent / csv_path
 
                 if not csv_full_path.exists():
@@ -561,6 +563,9 @@ class TrainingVisualizer(QMainWindow):
             if self.stop_evaluation:
                 break
 
+            if i % 100 == 0:
+                QApplication.processEvents()
+
             for j in range(i + 1, len(embeddings)):
                 dist = np.linalg.norm(embeddings[i] - embeddings[j])
                 label = 1 if patient_ids[i] == patient_ids[j] else 0
@@ -582,6 +587,9 @@ class TrainingVisualizer(QMainWindow):
         for i in range(len(embeddings)):
             if self.stop_evaluation:
                 break
+
+            if i % 100 == 0:
+                QApplication.processEvents()
 
             query_emb = embeddings[i]
             query_patient = patient_ids[i]
@@ -671,6 +679,8 @@ class TrainingVisualizer(QMainWindow):
             for dataset_name, csv_path in datasets:
                 if self.stop_evaluation:
                     break
+
+                QApplication.processEvents()
 
                 csv_full_path = Path(csv_path) if Path(csv_path).is_absolute() else self.current_run_path.parent.parent / csv_path
 

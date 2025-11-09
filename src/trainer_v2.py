@@ -243,8 +243,8 @@ def get_embeddings(encoder, features, device, batch_size=256):
 
 
 @torch.no_grad()
-def validate(encoder, val_dataset, device, sample_size=5000):
-    """Valida e ritorna metriche: CH, DB"""
+def validate(encoder, loss_fn, val_dataset, device, sample_size=5000, margin=1.2):
+    """Valida e ritorna metriche: loss, intra_dist, inter_dist, dist_ratio, active_neg_pct, CH, DB"""
     encoder.eval()
 
     print(f"Computing embeddings for validation...")
@@ -272,9 +272,89 @@ def validate(encoder, val_dataset, device, sample_size=5000):
     all_embeddings = np.array(all_embeddings)
     all_patient_ids = np.array(all_patient_ids)
 
-    # Metriche
-    print("Computing validation metrics...")
+    # Calcola loss e distanze
+    print("Computing validation loss and distances...")
+    val_loss, val_active_neg_pct, val_intra_dist, val_inter_dist = 0.0, 0.0, 0.0, 0.0
+
+    total_batches = 0
+    total_loss = 0.0
+    total_active_neg_pct = 0.0
+    total_intra_dist = 0.0
+    total_inter_dist = 0.0
+
+    # Crea batch pairs come nel training
+    batch_indices_list = list(range(0, len(all_embeddings), 256))
+
+    for batch_start_idx in tqdm(batch_indices_list[:10], desc="Computing loss", position=0, leave=True, ncols=100):  # Usa solo 10 batch per velocità
+        batch_end_idx = min(batch_start_idx + 256, len(all_embeddings))
+        batch_indices = np.arange(batch_start_idx, batch_end_idx)
+
+        batch_embeddings = all_embeddings[batch_indices]
+        batch_patient_ids = all_patient_ids[batch_indices]
+
+        # Crea coppie same/different come nel training
+        anchors = []
+        others = []
+        labels = []
+
+        for i, idx in enumerate(batch_indices):
+            anchor_patient = batch_patient_ids[i]
+
+            # Positivo: stesso paziente nel batch
+            pos_mask = (batch_patient_ids == anchor_patient)
+            pos_indices = np.where(pos_mask)[0]
+            pos_indices = pos_indices[pos_indices != i]
+
+            if len(pos_indices) > 0:
+                pos_i = np.random.choice(pos_indices)
+                anchors.append(batch_embeddings[i])
+                others.append(batch_embeddings[pos_i])
+                labels.append(0)
+
+            # Negativo: paziente diverso nel batch
+            neg_mask = (batch_patient_ids != anchor_patient)
+            neg_indices = np.where(neg_mask)[0]
+
+            if len(neg_indices) > 0:
+                neg_i = np.random.choice(neg_indices)
+                anchors.append(batch_embeddings[i])
+                others.append(batch_embeddings[neg_i])
+                labels.append(1)
+
+        if len(anchors) > 0:
+            anchors = torch.from_numpy(np.array(anchors)).float().to(device)
+            others = torch.from_numpy(np.array(others)).float().to(device)
+            labels = torch.from_numpy(np.array(labels)).float().to(device)
+
+            anchor_embs = encoder(anchors)
+            other_embs = encoder(others)
+
+            loss, active_neg_pct, intra_dist, inter_dist = loss_fn(anchor_embs, other_embs, labels)
+
+            total_loss += loss.item()
+            total_active_neg_pct += active_neg_pct
+            total_intra_dist += intra_dist
+            total_inter_dist += inter_dist
+            total_batches += 1
+
+    if total_batches > 0:
+        val_loss = total_loss / total_batches
+        val_active_neg_pct = total_active_neg_pct / total_batches
+        val_intra_dist = total_intra_dist / total_batches
+        val_inter_dist = total_inter_dist / total_batches
+
+    val_dist_ratio = val_inter_dist / val_intra_dist if val_intra_dist > 0 else 0.0
+
+    # Metriche CH e DB
+    print("Computing validation metrics (CH, DB)...")
     metrics = compute_batch_metrics(all_embeddings, all_patient_ids)
+
+    # Aggiungi le nuove metriche
+    metrics['val_loss'] = val_loss
+    metrics['val_active_neg_pct'] = val_active_neg_pct
+    metrics['val_intra_dist'] = val_intra_dist
+    metrics['val_inter_dist'] = val_inter_dist
+    metrics['val_dist_ratio'] = val_dist_ratio
 
     return metrics, all_embeddings
 
@@ -386,6 +466,11 @@ def main():
         'train_intra_dist': [],
         'train_inter_dist': [],
         'train_dist_ratio': [],
+        'val_loss': [],
+        'val_active_neg_pct': [],
+        'val_intra_dist': [],
+        'val_inter_dist': [],
+        'val_dist_ratio': [],
         'val_ch': [],
         'val_db': []
     }
@@ -436,10 +521,16 @@ def main():
         train_embeddings = get_embeddings(encoder, train_features, device)
 
         # Validate
-        val_metrics, val_embeddings = validate(encoder, val_dataset, device)
+        val_metrics, val_embeddings = validate(encoder, loss_fn, val_dataset, device,
+                                               sample_size=5000, margin=config['loss']['margin'])
 
         ch_score = val_metrics['ch']
         db_score = val_metrics['db']
+        val_loss = val_metrics['val_loss']
+        val_active_neg_pct = val_metrics['val_active_neg_pct']
+        val_intra_dist = val_metrics['val_intra_dist']
+        val_inter_dist = val_metrics['val_inter_dist']
+        val_dist_ratio = val_metrics['val_dist_ratio']
 
         # Salva metriche
         dist_ratio = train_inter_dist / train_intra_dist if train_intra_dist > 0 else 0.0
@@ -451,6 +542,11 @@ def main():
         history['train_intra_dist'].append(train_intra_dist)
         history['train_inter_dist'].append(train_inter_dist)
         history['train_dist_ratio'].append(dist_ratio)
+        history['val_loss'].append(val_loss)
+        history['val_active_neg_pct'].append(val_active_neg_pct)
+        history['val_intra_dist'].append(val_intra_dist)
+        history['val_inter_dist'].append(val_inter_dist)
+        history['val_dist_ratio'].append(val_dist_ratio)
         history['val_ch'].append(ch_score)
         history['val_db'].append(db_score)
 
@@ -464,12 +560,19 @@ def main():
         print(f"  Inter dist:     {train_inter_dist:.4f}")
         print(f"  Margin:         {train_inter_dist - train_intra_dist:.4f}")
         print(f"  Ratio (I/i):    {dist_ratio:.2f}x")
+        print(f"  Val Loss:       {val_loss:.6f}")
+        print(f"  Val Active Neg: {val_active_neg_pct:.1f}%")
+        print(f"  Val Intra dist: {val_intra_dist:.4f}")
+        print(f"  Val Inter dist: {val_inter_dist:.4f}")
+        print(f"  Val Ratio:      {val_dist_ratio:.2f}x")
         print(f"  Val CH:         {ch_score:.2f}")
         print(f"  Val DB:         {db_score:.2f}")
         print("="*90 + "\n")
 
-        logger.info(f"Loss: {train_loss:.6f}, Active neg: {train_active_neg_pct:.1f}%")
-        logger.info(f"Distances - Intra: {train_intra_dist:.4f}, Inter: {train_inter_dist:.4f}, Ratio: {dist_ratio:.2f}x")
+        logger.info(f"Train Loss: {train_loss:.6f}, Active neg: {train_active_neg_pct:.1f}%")
+        logger.info(f"Train Distances - Intra: {train_intra_dist:.4f}, Inter: {train_inter_dist:.4f}, Ratio: {dist_ratio:.2f}x")
+        logger.info(f"Val Loss: {val_loss:.6f}, Active neg: {val_active_neg_pct:.1f}%")
+        logger.info(f"Val Distances - Intra: {val_intra_dist:.4f}, Inter: {val_inter_dist:.4f}, Ratio: {val_dist_ratio:.2f}x")
         logger.info(f"Val CH: {ch_score:.2f}, DB: {db_score:.2f}")
 
         # Salva modello ogni epoca
