@@ -322,12 +322,11 @@ def validate(encoder, loss_fn, val_dataset, device, sample_size=5000, margin=1.2
                 labels.append(1)
 
         if len(anchors) > 0:
-            anchors = torch.from_numpy(np.array(anchors)).float().to(device)
-            others = torch.from_numpy(np.array(others)).float().to(device)
+            # Note: anchors and others are already embeddings from all_embeddings computed above
+            # Do NOT pass them through the encoder again
+            anchor_embs = torch.from_numpy(np.array(anchors)).float().to(device)
+            other_embs = torch.from_numpy(np.array(others)).float().to(device)
             labels = torch.from_numpy(np.array(labels)).float().to(device)
-
-            anchor_embs = encoder(anchors)
-            other_embs = encoder(others)
 
             loss, active_neg_pct, intra_dist, inter_dist = loss_fn(anchor_embs, other_embs, labels)
 

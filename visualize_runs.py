@@ -81,7 +81,17 @@ class TrainingVisualizer(QMainWindow):
         self.canvas = FigureCanvas(self.figure)
         self.training_layout.addWidget(self.canvas)
 
-        # Tab 2: Evaluation
+        # Tab 2: Validation Metrics
+        self.val_metrics_tab = QWidget()
+        self.val_metrics_layout = QVBoxLayout(self.val_metrics_tab)
+        self.tabs.addTab(self.val_metrics_tab, "Validation Metrics")
+
+        # Figure per matplotlib
+        self.figure_val_metrics = Figure(figsize=(14, 10), dpi=100)
+        self.canvas_val_metrics = FigureCanvas(self.figure_val_metrics)
+        self.val_metrics_layout.addWidget(self.canvas_val_metrics)
+
+        # Tab 3: Evaluation
         self.eval_tab = QWidget()
         self.eval_layout = QVBoxLayout(self.eval_tab)
         self.tabs.addTab(self.eval_tab, "Evaluation")
@@ -145,7 +155,7 @@ class TrainingVisualizer(QMainWindow):
         self.eval_results.setFont(QFont("Courier", 9))
         self.eval_layout.addWidget(self.eval_results)
 
-        # Tab 3: Best Epoch Stats
+        # Tab 4: Best Epoch Stats
         self.best_epoch_tab = QWidget()
         self.best_epoch_layout = QVBoxLayout(self.best_epoch_tab)
         self.tabs.addTab(self.best_epoch_tab, "Best Epoch Stats")
@@ -208,7 +218,7 @@ class TrainingVisualizer(QMainWindow):
         self.best_epoch_results.setFont(QFont("Courier", 9))
         self.best_epoch_layout.addWidget(self.best_epoch_results)
 
-        # Tab 4: Config
+        # Tab 5: Config
         self.config_tab = QWidget()
         self.config_layout = QVBoxLayout(self.config_tab)
         self.tabs.addTab(self.config_tab, "Config")
@@ -285,6 +295,7 @@ class TrainingVisualizer(QMainWindow):
 
             # Plotta
             self.plot_training_metrics()
+            self.plot_validation_metrics()
 
             self.statusBar().showMessage(f"✓ Loaded: {run_name} ({len(self.history_df)} epochs)")
 
@@ -389,6 +400,113 @@ class TrainingVisualizer(QMainWindow):
         self.figure.tight_layout()
 
         self.canvas.draw()
+
+    def plot_validation_metrics(self):
+        """Plotta le metriche di validazione dal training history"""
+        if self.history_df is None:
+            return
+
+        self.figure_val_metrics.clear()
+
+        # 3x2 layout
+        axes = self.figure_val_metrics.subplots(3, 2)
+        axes = axes.flatten()
+
+        epochs = self.history_df['epoch'].values
+        best_epoch = self.results_json.get('best_epoch', 1) if self.results_json else 1
+
+        # Plot 1: Validation CH (higher is better)
+        ax = axes[0]
+        ax.plot(epochs, self.history_df['val_ch'], 'b-o', linewidth=2, markersize=5, label='Validation CH')
+        self.add_trend_line(ax, epochs, self.history_df['val_ch'].values, degree=2, color='darkblue', label='Trend')
+        ax.axvline(x=best_epoch, color='r', linestyle='--', alpha=0.7, label=f'Best (ep {best_epoch})')
+        ax.axhline(self.history_df['val_ch'].max(), color='g', linestyle=':', alpha=0.5)
+        ax.set_xlabel('Epoch')
+        ax.set_ylabel('CH Score')
+        ax.set_title('Validation Calinski-Harabasz (Higher is Better)')
+        ax.grid(True, alpha=0.3)
+        ax.legend()
+
+        # Plot 2: Validation DB (lower is better)
+        ax = axes[1]
+        ax.plot(epochs, self.history_df['val_db'], 'g-s', linewidth=2, markersize=5, label='Validation DB')
+        self.add_trend_line(ax, epochs, self.history_df['val_db'].values, degree=2, color='darkgreen', label='Trend')
+        ax.axvline(x=best_epoch, color='r', linestyle='--', alpha=0.7, label=f'Best (ep {best_epoch})')
+        ax.axhline(self.history_df['val_db'].min(), color='g', linestyle=':', alpha=0.5)
+        ax.set_xlabel('Epoch')
+        ax.set_ylabel('DB Score')
+        ax.set_title('Validation Davies-Bouldin (Lower is Better)')
+        ax.grid(True, alpha=0.3)
+        ax.legend()
+
+        # Plot 3: Validation Loss
+        ax = axes[2]
+        if 'val_loss' in self.history_df.columns:
+            ax.plot(epochs, self.history_df['val_loss'], 'purple', linewidth=2, marker='o', markersize=5, label='Loss')
+            self.add_trend_line(ax, epochs, self.history_df['val_loss'].values, degree=2, color='indigo', label='Trend')
+            ax.axvline(x=best_epoch, color='r', linestyle='--', alpha=0.7)
+            ax.set_xlabel('Epoch')
+            ax.set_ylabel('Loss')
+            ax.set_title('Validation Loss')
+            ax.grid(True, alpha=0.3)
+            ax.legend()
+        else:
+            ax.text(0.5, 0.5, 'val_loss not available', ha='center', va='center', transform=ax.transAxes, fontsize=11)
+            ax.axis('off')
+
+        # Plot 4: Intra vs Inter distances
+        ax = axes[3]
+        if 'val_intra_dist' in self.history_df.columns and 'val_inter_dist' in self.history_df.columns:
+            ax.plot(epochs, self.history_df['val_intra_dist'], 'o-', linewidth=2, markersize=5,
+                   label='Intra (same patient)', color='orange')
+            ax.plot(epochs, self.history_df['val_inter_dist'], 's-', linewidth=2, markersize=5,
+                   label='Inter (diff patient)', color='red')
+            ax.axvline(x=best_epoch, color='r', linestyle='--', alpha=0.7)
+            ax.set_xlabel('Epoch')
+            ax.set_ylabel('Distance')
+            ax.set_title('Intra vs Inter-Patient Distances')
+            ax.legend()
+            ax.grid(True, alpha=0.3)
+        else:
+            ax.text(0.5, 0.5, 'Distance metrics not available', ha='center', va='center', transform=ax.transAxes, fontsize=11)
+            ax.axis('off')
+
+        # Plot 5: Distance Ratio (higher is better)
+        ax = axes[4]
+        if 'val_dist_ratio' in self.history_df.columns:
+            ax.plot(epochs, self.history_df['val_dist_ratio'], 'cyan', linewidth=2, marker='D', markersize=5, label='Ratio')
+            self.add_trend_line(ax, epochs, self.history_df['val_dist_ratio'].values, degree=2, color='darkcyan', label='Trend')
+            ax.axvline(x=best_epoch, color='r', linestyle='--', alpha=0.7)
+            ax.axhline(y=1.0, color='k', linestyle=':', alpha=0.3, label='Baseline (1.0x)')
+            ax.set_xlabel('Epoch')
+            ax.set_ylabel('Ratio (Inter/Intra)')
+            ax.set_title('Validation Distance Ratio (Higher is Better)')
+            ax.grid(True, alpha=0.3)
+            ax.legend()
+        else:
+            ax.text(0.5, 0.5, 'Distance ratio not available', ha='center', va='center', transform=ax.transAxes, fontsize=11)
+            ax.axis('off')
+
+        # Plot 6: Active Negatives percentage
+        ax = axes[5]
+        if 'val_active_neg_pct' in self.history_df.columns:
+            ax.plot(epochs, self.history_df['val_active_neg_pct'], 'brown', linewidth=2, marker='^', markersize=5, label='Active %')
+            self.add_trend_line(ax, epochs, self.history_df['val_active_neg_pct'].values, degree=2, color='darkred', label='Trend')
+            ax.axvline(x=best_epoch, color='r', linestyle='--', alpha=0.7)
+            ax.set_xlabel('Epoch')
+            ax.set_ylabel('Percentage (%)')
+            ax.set_title('Active Negatives % (Higher = Harder Mining)')
+            ax.grid(True, alpha=0.3)
+            ax.legend()
+        else:
+            ax.text(0.5, 0.5, 'Active negatives metric not available', ha='center', va='center', transform=ax.transAxes, fontsize=11)
+            ax.axis('off')
+
+        # Title generale
+        self.figure_val_metrics.suptitle(f'Validation Metrics: {self.current_run}', fontsize=14, fontweight='bold')
+        self.figure_val_metrics.tight_layout()
+
+        self.canvas_val_metrics.draw()
 
     def stop_evaluation_clicked(self):
         """Arresta la valutazione in corso"""

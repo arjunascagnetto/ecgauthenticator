@@ -1,0 +1,48 @@
+# Evaluation Configuration for Rank Metrics
+# Calculates AUC, Rank@1, Rank@5, Rank@10 across training epochs
+
+evaluation:
+  # Campionamento pazienti per velocità computazionale
+  num_patients: 2000        # default: 1000, null/0 = usa tutti i pazienti
+  random_seed: 42
+
+  # Selezione run e modelli
+  run_id: run_20251108_205548       # null = ultima run disponibile, altrimenti: "run_20251108_205548"
+  model_interval: 2      # null = tutti i modelli, altrimenti: numero (es 5 = ogni 5 epoche)
+
+  # Dataset splits da valutare
+  splits:
+    train: false            # Valuta su training set
+    val: true               # Valuta su validation set
+    test: true              # Valuta su test set
+
+  # Parametri di calcolo
+  batch_size: 256           # Batch size per embedding computation
+  distance_metric: "cosine" # "cosine" o "euclidean"
+
+  # Threshold parametri per curve ROC
+  compute_roc_curve: true   # Salva dati per plot ROC completa
+
+output:
+  # Directory di output
+  output_dir: "evaluation_results"  # Crea sotto runs_v2/run_id/
+
+  # Cosa salvare
+  save_results_csv: true
+  save_plots_png: true
+  save_statistics_txt: true
+
+  # Visualizzazione
+  show_gui: true            # Apri Qt5 viewer con risultati
+  plot_dpi: 150
+
+  # Nomi file (con timestamp aggiunto automaticamente)
+  results_file: "rank_metrics_results.csv"
+  statistics_file: "rank_metrics_statistics.txt"
+  plot_file: "rank_metrics_evolution.png"
+  roc_plot_file: "rank_metrics_roc.png"
+
+# Logging
+logging:
+  level: "INFO"             # DEBUG, INFO, WARNING, ERROR
+  log_file: "evaluation.log"

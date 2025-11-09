@@ -62,6 +62,8 @@ class EvaluationGUI(QMainWindow):
 
         self.tabs.addTab(self.tab_training, "Training")
         self.tabs.addTab(self.tab_validation, "Validation")
+        self.tab_val_metrics = QWidget()
+        self.tabs.addTab(self.tab_val_metrics, "Validation Metrics")
         self.tabs.addTab(self.tab_best, "Best Model")
         self.tabs.addTab(self.tab_epoch, "Epoch Model")
         self.tabs.addTab(self.tab_evolution, "Metrics Evolution")
@@ -73,6 +75,7 @@ class EvaluationGUI(QMainWindow):
 
         self.setup_training_tab()
         self.setup_validation_tab()
+        self.setup_validation_metrics_tab()
         self.setup_best_tab()
         self.setup_epoch_tab()
         self.setup_evolution_tab()
@@ -144,13 +147,16 @@ class EvaluationGUI(QMainWindow):
 
     def on_tab_changed(self, index):
         """Lazy load tab content when activated."""
-        tab_names = ["Training", "Validation", "Best Model", "Epoch Model", "Metrics Evolution"]
+        tab_names = ["Training", "Validation", "Validation Metrics", "Best Model", "Epoch Model", "Metrics Evolution"]
         tab_name = tab_names[index]
 
         if tab_name in self.tabs_loaded:
             return  # Already loaded
 
-        if tab_name == "Best Model":
+        if tab_name == "Validation Metrics":
+            self.plot_validation_metrics()
+            self.tabs_loaded["Validation Metrics"] = True
+        elif tab_name == "Best Model":
             self.plot_best()
             self.tabs_loaded["Best Model"] = True
         elif tab_name == "Epoch Model":
@@ -173,6 +179,13 @@ class EvaluationGUI(QMainWindow):
         self.canvas_val = FigureCanvas(self.fig_val)
         layout.addWidget(self.canvas_val)
         self.tab_validation.setLayout(layout)
+
+    def setup_validation_metrics_tab(self):
+        layout = QGridLayout()
+        self.fig_val_metrics = Figure(figsize=(14, 10))
+        self.canvas_val_metrics = FigureCanvas(self.fig_val_metrics)
+        layout.addWidget(self.canvas_val_metrics)
+        self.tab_val_metrics.setLayout(layout)
 
     def setup_best_tab(self):
         layout = QVBoxLayout()
@@ -332,6 +345,100 @@ class EvaluationGUI(QMainWindow):
 
         self.fig_val.tight_layout()
         self.canvas_val.draw()
+
+    def plot_validation_metrics(self):
+        """Plot all validation metrics from history."""
+        if self.history is None:
+            return
+
+        self.fig_val_metrics.clear()
+        h = self.history
+        best_ep = self.results['best_epoch']
+
+        # Create 3x2 subplot grid
+        axes = self.fig_val_metrics.subplots(3, 2)
+        axes = axes.flatten()
+
+        # 1. Validation CH (higher is better)
+        ax = axes[0]
+        ax.plot(h['epoch'], h['val_ch'], 'b-o', markersize=5, linewidth=2, label='Validation CH')
+        ax.axvline(best_ep, color='r', linestyle='--', alpha=0.7, label=f'Best (ep {best_ep})')
+        ax.axhline(h['val_ch'].max(), color='g', linestyle=':', alpha=0.5)
+        ax.set_xlabel('Epoch')
+        ax.set_ylabel('CH Score')
+        ax.set_title('Validation Calinski-Harabasz (Higher is Better)')
+        ax.grid(True, alpha=0.3)
+        ax.legend()
+
+        # 2. Validation DB (lower is better)
+        ax = axes[1]
+        ax.plot(h['epoch'], h['val_db'], 'g-o', markersize=5, linewidth=2, label='Validation DB')
+        ax.axvline(best_ep, color='r', linestyle='--', alpha=0.7, label=f'Best (ep {best_ep})')
+        ax.axhline(h['val_db'].min(), color='g', linestyle=':', alpha=0.5)
+        ax.set_xlabel('Epoch')
+        ax.set_ylabel('DB Score')
+        ax.set_title('Validation Davies-Bouldin (Lower is Better)')
+        ax.grid(True, alpha=0.3)
+        ax.legend()
+
+        # 3. Validation Loss
+        ax = axes[2]
+        if 'val_loss' in h.columns:
+            ax.plot(h['epoch'], h['val_loss'], 'purple', marker='o', markersize=5, linewidth=2)
+            ax.axvline(best_ep, color='r', linestyle='--', alpha=0.7)
+            ax.set_xlabel('Epoch')
+            ax.set_ylabel('Loss')
+            ax.set_title('Validation Loss')
+            ax.grid(True, alpha=0.3)
+        else:
+            ax.text(0.5, 0.5, 'val_loss not available', ha='center', va='center', transform=ax.transAxes)
+            ax.axis('off')
+
+        # 4. Intra vs Inter distances
+        ax = axes[3]
+        if 'val_intra_dist' in h.columns and 'val_inter_dist' in h.columns:
+            ax.plot(h['epoch'], h['val_intra_dist'], 'o-', markersize=5, linewidth=2, label='Intra (same patient)', color='orange')
+            ax.plot(h['epoch'], h['val_inter_dist'], 's-', markersize=5, linewidth=2, label='Inter (diff patient)', color='red')
+            ax.axvline(best_ep, color='r', linestyle='--', alpha=0.7)
+            ax.set_xlabel('Epoch')
+            ax.set_ylabel('Distance')
+            ax.set_title('Intra vs Inter-Patient Distances')
+            ax.legend()
+            ax.grid(True, alpha=0.3)
+        else:
+            ax.text(0.5, 0.5, 'Distance metrics not available', ha='center', va='center', transform=ax.transAxes)
+            ax.axis('off')
+
+        # 5. Distance Ratio (higher is better = better separation)
+        ax = axes[4]
+        if 'val_dist_ratio' in h.columns:
+            ax.plot(h['epoch'], h['val_dist_ratio'], 'cyan', marker='D', markersize=5, linewidth=2)
+            ax.axvline(best_ep, color='r', linestyle='--', alpha=0.7)
+            ax.set_xlabel('Epoch')
+            ax.set_ylabel('Ratio')
+            ax.set_title('Validation Distance Ratio (Inter/Intra, Higher is Better)')
+            ax.grid(True, alpha=0.3)
+        else:
+            ax.text(0.5, 0.5, 'Distance ratio not available', ha='center', va='center', transform=ax.transAxes)
+            ax.axis('off')
+
+        # 6. Active Negatives percentage
+        ax = axes[5]
+        if 'val_active_neg_pct' in h.columns:
+            ax.plot(h['epoch'], h['val_active_neg_pct'], 'brown', marker='^', markersize=5, linewidth=2)
+            ax.axvline(best_ep, color='r', linestyle='--', alpha=0.7)
+            ax.set_xlabel('Epoch')
+            ax.set_ylabel('Percentage (%)')
+            ax.set_title('Active Negatives % (Higher = Harder Mining)')
+            ax.grid(True, alpha=0.3)
+        else:
+            ax.text(0.5, 0.5, 'Active negatives metric not available', ha='center', va='center', transform=ax.transAxes)
+            ax.axis('off')
+
+        self.fig_val_metrics.suptitle(f'Validation Metrics Evolution (Best Epoch: {best_ep})',
+                                      fontsize=14, fontweight='bold', y=0.995)
+        self.fig_val_metrics.tight_layout()
+        self.canvas_val_metrics.draw()
 
     def plot_best(self):
         if self.test_dataset is None:
