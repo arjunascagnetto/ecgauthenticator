@@ -55,7 +55,6 @@ class ContrastiveLoss(nn.Module):
     def __init__(self, margin):
         super(ContrastiveLoss, self).__init__()
         self.margin = margin
-        logger.info(f"ContrastiveLoss initialized with margin={margin}")
 
     def forward(self, anchor, positive, labels):
         """
@@ -194,7 +193,7 @@ def create_pairs_batch(batch_indices, features, patient_ids, device, mining_stra
                         else:
                             neg_i = distances[-1][1]  # hardest
                     else:  # hard
-                        neg_i = distances[-1][1]  # hardest negative
+                        neg_i = distances[0][1]  # hardest negative (closest)
                 else:
                     neg_i = np.random.choice(neg_indices)
 

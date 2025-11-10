@@ -1,0 +1,44 @@
+# Grid search configuration - lista di parametri da esplorare
+# La struttura è identica a train_config_v2.yaml ma i valori sono liste
+# itertools.product() genererà tutte le combinazioni
+
+training:
+  max_epochs: [100]
+  patience: [20]
+
+optimizer:
+  learning_rate: [5e-4]
+  weight_decay: [1e-5]
+  lr_scheduler_factor: [0.5]
+  lr_scheduler_patience: [5]
+
+loss:
+  margin: [0.5, 1.0]
+
+evaluation:
+  sample_size: [5000]
+
+mining:
+  random_epochs: [5]
+  semihard_epochs: [15, 30]
+  hardmining_epochs: [100]
+  positive_random_epochs: [5,10,100]
+  positive_hard_epochs: [100]
+
+batch:
+  num_patients: [16, 32]
+  num_ecg: [8]
+
+encoder:
+  input_dim: [13]
+  hidden_dims: [[32, 64, 128]]
+  embedding_dim: [64]
+  dropout: [0.2]
+  normalize: [true]
+
+data:
+  train_csv: ["data/ECG/train.csv"]
+  val_csv: ["data/ECG/val.csv"]
+  test_csv: ["data/ECG/test.csv"]
+
+device: ["cuda"]
